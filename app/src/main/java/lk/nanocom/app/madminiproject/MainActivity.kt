@@ -30,6 +30,57 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+
+data class Floor(
+    val id: String,
+    val name: String,
+    val rooms: List<Room>
+)
+
+data class Room(
+    val id: String,
+    val name: String,
+    val devices: List<Device>
+)
+
+data class Switch(
+    val id: String,
+    val isOn: Boolean
+)
+
+sealed class Device {
+    data class Outlet(
+        val id: String,
+        val name: String,
+        var isOn: Boolean,
+        var status: DeviceStatus
+    ) : Device()
+
+    data class MultiSwitch(
+        val id: String,
+        val name: String,
+        val switches: List<Switch>,
+        var status: DeviceStatus
+    ) : Device()
+
+    data class SafetyDevice(
+        val id: String,
+        val name: String,
+        var isOn: Boolean,
+        val maxOnDuration: Int,
+        var status: DeviceStatus
+    ) : Device()
+
+    data class Camera(
+        val id: String,
+        val name: String,
+        val streamUri: String,
+        var status: DeviceStatus
+    ) : Device()
+}
+
+enum class DeviceStatus {ON, OFF, ERROR, DISCONNECTED}
+
 @Composable
 fun Greeting(name: String, modifier: Modifier = Modifier) {
     Text(
@@ -45,4 +96,3 @@ fun GreetingPreview() {
         Greeting("Android")
     }
 }
-//hello.... this is my first commit
