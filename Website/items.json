@@ -1,0 +1,26 @@
+{
+    "room":[
+        {
+            "Living Room":[
+                {
+                    "name":"light1",
+                    "type":"light"
+                },
+                {
+                    "name":"light2",
+                    "type":"light"
+                }
+            ],
+            "Bed Room":[
+                {
+                    "name":"light1",
+                    "type":"light"
+                },
+                {
+                    "name":"light2",
+                    "type":"light"
+                }
+            ]
+        }
+    ]
+}
