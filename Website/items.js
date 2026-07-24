@@ -3,12 +3,18 @@ items = [
         "room":"Living Room",
         "items":[
                     {
-                    "id":1,
-                    "name":"light1",
-                    "type":"light"
+                        "id":1,
+                        "name":"light1",
+                        "type":"light"
                     },
-                    {   "id":2,
+                    {   
+                        "id":2,
                         "name":"light2",
+                        "type":"light"
+                    },
+                    {   
+                        "id":3,
+                        "name":"light3",
                         "type":"light"
                     }
                 ]
@@ -17,11 +23,12 @@ items = [
         "room":"Bed Room",
         "items":[
                     {
-                    "id":3,
-                    "name":"light1",
-                    "type":"light"
+                        "id":4,
+                        "name":"light1",
+                        "type":"light"
                     },
-                    {   "id":4,
+                    {   
+                        "id":5,
                         "name":"light2",
                         "type":"light"
                     }

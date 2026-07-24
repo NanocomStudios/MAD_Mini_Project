@@ -21,6 +21,7 @@ c.execute("CREATE TABLE IF NOT EXISTS items (\
     itemID INTEGER PRIMARY KEY,\
     itemName TEXT NOT NULL,\
     type TEXT NOT NULL,\
+    state TEXT NOT NULL DEFAULT '0',\
     lastOnTime TEXT NOT NULL DEFAULT '0',\
     cuttoffTime TEXT NOT NULL DEFAULT '0')")
 
@@ -36,7 +37,7 @@ def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("Successfully connected to HiveMQ!")
         # Subscribe to your target topic upon connection
-        client.subscribe("item/broadcast", qos=1)
+        client.subscribe("broadcast/server", qos=1)
     else:
         print(f"Connection failed with code {rc}")
 
@@ -97,6 +98,10 @@ class Action(BaseModel):
     action: str
     value: int
 
+class Update(BaseModel):
+    itemID: int
+    value: int
+
 @app.post("/user/login")
 def login(user: User):
     conn = sqlite3.connect('items.db')
@@ -151,6 +156,26 @@ def itemRegister(item: Item):
 
 @app.post("/item/action")
 def itemAction(action: Action):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE items SET state=? WHERE itemID=?", (str(action.value), action.itemID))
+        conn.commit()
+        conn.close()
+
+        payload = {"action":action.action, "value": action.value}
+        client.publish("item/" + str(action.itemID) , payload=json.dumps(payload), qos=1)
+
+        return {"response": "success", "action":action.action, "value": action.value} 
+
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: action on the item!"} 
+
+
+
+@app.post("/item/update")
+def itemAction(update: Update):
     payload = {"action":action.action, "value": action.value}
     client.publish("item/" + str(action.itemID) , payload=json.dumps(payload), qos=1)
 

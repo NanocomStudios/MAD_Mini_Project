@@ -24,7 +24,7 @@ client.on('connect', () => {
     console.log('Successfully connected to HiveMQ via WebSockets!');
     
     // Subscribe to a topic
-    client.subscribe("item/broadcast", (err) => {
+    client.subscribe("broadcast/item", (err) => {
         if (err) {
             console.error('Subscription error:', err);
         }
@@ -33,8 +33,19 @@ client.on('connect', () => {
 
 // 3. Handle Incoming Messages
 client.on('message', (topic, message) => {
-    // message is a Buffer object, convert it to a string
-    console.log(`Received message on [${topic}]: ${message.toString()}`);
+    var topicList = topic.split("/");
+    switch (topicList[0]) {
+        case "item":
+            console.log("Item MSG :- " + topicList[1] + " > " + message);
+            itemMsgHandler(topicList[1], message);
+            break;
+
+        case "broadcast":
+            break;
+    
+        default:
+            break;
+    }
 });
 
 // 4. Handle Errors & Reconnections
@@ -46,6 +57,54 @@ client.on('error', (err) => {
 client.on('reconnect', () => {
     console.log('Attempting to reconnect...');
 });
+
+
+function itemMsgHandler(itemID, message){
+    const action = JSON.parse(message);
+    if(action.action == "toggle"){
+        switchLight(itemID, action.value);
+    }
+}
+
+function switchLight(itemID, state){
+    itemList[itemID].state = (state == 0) ? 0 : 1;
+    if(state == 0){
+        document.getElementById(itemID + "_icon").src = "data/light_off.png";
+    }else{
+        document.getElementById(itemID + "_icon").src = "data/light_on.png";
+    }
+}
+
+function toggleSwitch(itemID){
+
+    var value = 0;
+    if(itemList[itemID].state == 0){
+        value = 1;
+    }
+
+    const payload = {
+        "itemID":itemID,
+        "action":"toggle",
+        "value":value
+    }
+
+    switchLight(itemID, value);
+
+    const url = "http://localhost:8000/item/action";
+    try{
+        fetch(url, {
+            method: "POST",
+            headers: {
+            "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+    }catch (error){
+        console.log("Error (catch)");
+        return null;
+    }
+}
+
 
 async function registerItemOnServer(itemID, itemName, type){
     const payload = {
@@ -75,9 +134,6 @@ async function registerItemOnServer(itemID, itemName, type){
         console.log("Error (catch)");
         return null;
     }
-    
-
-
 }
 
 async function loadItems(){
@@ -118,16 +174,34 @@ async function loadItems(){
             }
 
             var item_card = document.createElement("div");
+            item_card.classList.add("item_container");
+
             var item_name = document.createElement("h3");
             item_name.innerText = item.name;
 
+             var item_action;
+
             var item_icon = document.createElement("img");
+            switch (item.type) {
+                case "light":
+                    item_icon.src = "data/light_off.png";
+                    item_icon.id= itemID + "_icon";
+
+                    item_action = document.createElement("button");
+                    item_action.innerText = "On/Off";
+                    item_action.onclick = function() {
+                        toggleSwitch(itemID);
+                    }
+                    break;
+            
+                default:
+                    break;
+            }
 
             var item_id = document.createElement("h4");
             item_id.innerText = item.id
             
-            var item_action = document.createElement("button");
-            item_action.innerText = item.type;
+            
 
             
             item_card.appendChild(item_name);
