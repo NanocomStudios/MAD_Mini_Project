@@ -7,60 +7,22 @@ from pydantic import BaseModel
 import hashlib
 import sqlite3
 
+import json
+
 from fastapi.middleware.cors import CORSMiddleware
 
-conn = sqlite3.connect('users.db')
+conn = sqlite3.connect('items.db')
 c = conn.cursor()
 
-c.execute("CREATE TABLE IF NOT EXISTS users (userid INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
-c.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, userid INTEGER, FOREIGN KEY(userid) REFERENCES users(userid))")
+c.execute("CREATE TABLE IF NOT EXISTS users (userID INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)")
+c.execute("CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, userID INTEGER, FOREIGN KEY(userID) REFERENCES users(userID))")
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:8000"], # Your frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class User(BaseModel):
-    username: str
-    password: str
-
-class Session(BaseModel):
-    userid: int
-    sessionID: str
-
-@app.post("/login")
-def login(user: User):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username=? AND password=?", (user.username, user.password))
-    result = c.fetchone()
-    if result:
-        session_id = hashlib.sha256((user.username + user.password + str(time.time())).encode()).hexdigest()
-        c.execute("INSERT OR REPLACE INTO sessions (session_id, userid) VALUES (?, ?)", (session_id, result[0]))
-        conn.commit()
-        conn.close()
-        return {"response": "success", "sessionID" : session_id, "userid": result[0]}
-    else:
-        conn.close()
-        return {"response": "failure"}
-
-@app.post("/register")
-def register(user: User):
-    conn = sqlite3.connect('users.db')
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user.username, user.password))
-        conn.commit()
-        conn.close()
-        return {"response": "success"}
-    except sqlite3.IntegrityError:
-        conn.close()
-        return {"response": "failure", "error": "Username already exists"}
+c.execute("CREATE TABLE IF NOT EXISTS items (\
+    itemID INTEGER PRIMARY KEY,\
+    itemName TEXT NOT NULL,\
+    type TEXT NOT NULL,\
+    lastOnTime TEXT NOT NULL DEFAULT '0',\
+    cuttoffTime TEXT NOT NULL DEFAULT '0')")
 
 # Configuration settings
 # Replace with your HiveMQ Cloud Cluster URL (e.g., "xxxxxx.s1.eu.hivemq.cloud")
@@ -68,14 +30,13 @@ BROKER_URL = "24e1871158284517be3fd3a18d23a9ec.s1.eu.hivemq.cloud"
 PORT = 8883 # Secure TLS port
 USERNAME = "mad_py"
 PASSWORD = "password123"
-TOPIC = "topic1"
 
 # Callback triggered when the client connects to the broker
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("Successfully connected to HiveMQ!")
         # Subscribe to your target topic upon connection
-        client.subscribe(TOPIC, qos=1)
+        client.subscribe("item/broadcast", qos=1)
     else:
         print(f"Connection failed with code {rc}")
 
@@ -107,6 +68,91 @@ client.connect(BROKER_URL, PORT, keepalive=60)
 
 # 6. Start the network loop in a background thread to handle incoming/outgoing messages
 client.loop_start()
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class User(BaseModel):
+    username: str
+    password: str
+
+class Session(BaseModel):
+    userID: int
+    sessionID: str
+
+class Item(BaseModel):
+    itemID: int
+    itemName: str
+    itemType: str
+
+class Action(BaseModel):
+    itemID: int
+    action: str
+    value: int
+
+@app.post("/user/login")
+def login(user: User):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username=? AND password=?", (user.username, user.password))
+    result = c.fetchone()
+    if result:
+        session_id = hashlib.sha256((user.username + user.password + str(time.time())).encode()).hexdigest()
+        c.execute("INSERT OR REPLACE INTO sessions (session_id, userID) VALUES (?, ?)", (session_id, result[0]))
+        conn.commit()
+        conn.close()
+        return {"response": "success", "sessionID" : session_id, "userID": result[0]}
+    else:
+        conn.close()
+        return {"response": "failure"}
+
+@app.post("/user/register")
+def register(user: User):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user.username, user.password))
+        conn.commit()
+        conn.close()
+        return {"response": "success"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Username already exists"}
+
+@app.post("/item/register")
+def itemRegister(item: Item):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM items WHERE itemID=?", (item.itemID,))
+    result = c.fetchone()
+    if result:
+        if(result[2] == item.itemType):
+            conn.close()
+            return {"response": "success", "itemName": result[1]}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Different item with the same item ID exists!"}
+    else:
+        try:
+            c.execute("INSERT INTO items (itemID, itemName, type) VALUES (?, ?, ?)", (item.itemID, item.itemName, item.itemType))
+            conn.commit()
+            conn.close()
+            return {"response": "success"}
+        except sqlite3.IntegrityError:
+            conn.close()
+            return {"response": "failure", "error": "Error registering the item!"}
+
+@app.post("/item/action")
+def itemAction(action: Action):
+    payload = {"action":action.action, "value": action.value}
+    client.publish("item/" + str(action.itemID) , payload=json.dumps(payload), qos=1)
 
 # try:
     # 7. Publish messages periodically
