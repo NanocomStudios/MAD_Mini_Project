@@ -35,7 +35,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
@@ -47,6 +46,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 
 class MainActivity : ComponentActivity() {
@@ -174,7 +178,9 @@ fun SmartHomeApp() {
         composable("floors") {
             FloorListScreen(
                 floors = SampleData.floors,
-                onFloorClick = { floorId -> navController.navigate("floors/$floorId") }
+                onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
+                onAddFloorClick = {},
+                onDeleteFloorClick = {}
             )
         }
         composable(
@@ -186,7 +192,9 @@ fun SmartHomeApp() {
             RoomListScreen(
                 floor = floor,
                 onRoomClick = { roomId -> navController.navigate("floors/$floorId/rooms/$roomId") },
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                onAddRoomClick = {},
+                onDeleteRoomClick = {}
             )
         }
         composable(
@@ -202,7 +210,9 @@ fun SmartHomeApp() {
             DeviceGridScreen(
                 room = room,
                 onBack = { navController.popBackStack() },
-                onToggleDevice = { /* wire up later */ }
+                onToggleDevice = {},
+                onAddDeviceClick = {},
+                onDeleteDeviceClick = {}
             )
         }
     }
@@ -210,8 +220,27 @@ fun SmartHomeApp() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FloorListScreen(floors: List<Floor>, onFloorClick: (String) -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("Floors") }) }) { padding ->
+fun FloorListScreen(
+    floors: List<Floor>,
+    onFloorClick: (String) -> Unit,
+    onAddFloorClick: () -> Unit,
+    onDeleteFloorClick: (String) -> Unit
+) {
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Floors") }) },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAddFloorClick,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Floor"
+                )
+            }
+        }
+    ) { padding ->
         LazyColumn(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -227,8 +256,24 @@ fun FloorListScreen(floors: List<Floor>, onFloorClick: (String) -> Unit) {
                         .clickable { onFloorClick(floor.id) },
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(floor.name, style = MaterialTheme.typography.titleMedium)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Text(
+                            text = floor.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                        IconButton(
+                            onClick = { onDeleteFloorClick(floor.id) },
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Delete Floor",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }
@@ -238,7 +283,13 @@ fun FloorListScreen(floors: List<Floor>, onFloorClick: (String) -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RoomListScreen(floor: Floor, onRoomClick: (String) -> Unit, onBack: () -> Unit) {
+fun RoomListScreen(
+    floor: Floor,
+    onRoomClick: (String) -> Unit,
+    onBack: () -> Unit,
+    onAddRoomClick: () -> Unit,
+    onDeleteRoomClick: (String) -> Unit
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -249,6 +300,18 @@ fun RoomListScreen(floor: Floor, onRoomClick: (String) -> Unit, onBack: () -> Un
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAddRoomClick,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Room"
+                )
+            }
         }
     ) { padding ->
         LazyVerticalGrid(
@@ -260,13 +323,38 @@ fun RoomListScreen(floor: Floor, onRoomClick: (String) -> Unit, onBack: () -> Un
         ) {
             items(floor.rooms) { room ->
                 Card(
-                    modifier = Modifier.aspectRatio(1f).clickable { onRoomClick(room.id) },
+                    modifier = Modifier
+                        .aspectRatio(1f)
+                        .clickable { onRoomClick(room.id) },
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(room.name, style = MaterialTheme.typography.titleMedium)
-                            Text("${room.devices.size} devices", style = MaterialTheme.typography.bodySmall)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = room.name,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "${room.devices.size} devices",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        IconButton(
+                            onClick = { onDeleteRoomClick(room.id) },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Delete Room",
+                                tint = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
@@ -277,7 +365,13 @@ fun RoomListScreen(floor: Floor, onRoomClick: (String) -> Unit, onBack: () -> Un
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DeviceGridScreen(room: Room, onBack: () -> Unit, onToggleDevice: (String) -> Unit) {
+fun DeviceGridScreen(
+    room: Room,
+    onBack: () -> Unit,
+    onToggleDevice: (String) -> Unit,
+    onAddDeviceClick: () -> Unit,
+    onDeleteDeviceClick: (String) -> Unit
+) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -288,6 +382,18 @@ fun DeviceGridScreen(room: Room, onBack: () -> Unit, onToggleDevice: (String) ->
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAddDeviceClick,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Device"
+                )
+            }
         }
     ) { padding ->
         LazyVerticalGrid(
@@ -298,7 +404,12 @@ fun DeviceGridScreen(room: Room, onBack: () -> Unit, onToggleDevice: (String) ->
             modifier = Modifier.padding(padding).fillMaxSize()
         ) {
             items(room.devices) { device ->
-                DeviceCard(device = device, onToggle = { onToggleDevice(deviceIdOf(device)) })
+                val deviceId = deviceIdOf(device)
+                DeviceCard(
+                    device = device,
+                    onToggle = { onToggleDevice(deviceId) },
+                    onDelete = { onDeleteDeviceClick(deviceId) }
+                )
             }
         }
     }
@@ -312,41 +423,63 @@ fun deviceIdOf(device: Device): String = when (device) {
 }
 
 @Composable
-fun DeviceCard(device: Device, onToggle: () -> Unit) {
+fun DeviceCard(
+    device: Device,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(
-        modifier = Modifier.aspectRatio(1f).clickable(enabled = device !is Device.Camera) { onToggle() },
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clickable(enabled = device !is Device.Camera) { onToggle() },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            when (device) {
-                is Device.Outlet -> {
-                    Text(device.name, style = MaterialTheme.typography.titleSmall)
-                    StatusBadge(device.status)
-                    Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                when (device) {
+                    is Device.Outlet -> {
+                        Text(device.name, style = MaterialTheme.typography.titleSmall)
+                        StatusBadge(device.status)
+                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+                    }
+                    is Device.MultiSwitch -> {
+                        Text(device.name, style = MaterialTheme.typography.titleSmall)
+                        StatusBadge(device.status)
+                        Text(
+                            "${device.switches.count { it.isOn }}/${device.switches.size} on",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    is Device.SafetyDevice -> {
+                        Text(device.name, style = MaterialTheme.typography.titleSmall)
+                        StatusBadge(device.status)
+                        Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+                    }
+                    is Device.Camera -> {
+                        Text(device.name, style = MaterialTheme.typography.titleSmall)
+                        StatusBadge(device.status)
+                        Icon(Icons.Default.Videocam, contentDescription = null)
+                    }
                 }
-                is Device.MultiSwitch -> {
-                    Text(device.name, style = MaterialTheme.typography.titleSmall)
-                    StatusBadge(device.status)
-                    Text(
-                        "${device.switches.count { it.isOn }}/${device.switches.size} on",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-                is Device.SafetyDevice -> {
-                    Text(device.name, style = MaterialTheme.typography.titleSmall)
-                    StatusBadge(device.status)
-                    Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
-                    Switch(checked = device.isOn, onCheckedChange = { onToggle() })
-                }
-                is Device.Camera -> {
-                    Text(device.name, style = MaterialTheme.typography.titleSmall)
-                    StatusBadge(device.status)
-                    Icon(Icons.Default.Videocam, contentDescription = null)
-                }
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Delete Device",
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
