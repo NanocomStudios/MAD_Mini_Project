@@ -105,6 +105,29 @@ function toggleSwitch(itemID){
     }
 }
 
+function pressDoorBell(itemID){
+    const payload = {
+        "itemID":itemID,
+        "action":"ring",
+        "value":1
+    }
+
+    const url = "http://localhost:8000/item/action";
+    try{
+        fetch(url, {
+            method: "POST",
+            headers: {
+            "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+    }catch (error){
+        console.log("Error (catch)");
+        return null;
+    }
+}
+
+
 
 async function registerItemOnServer(itemID, itemName, type){
     const payload = {
@@ -179,7 +202,7 @@ async function loadItems(){
             var item_name = document.createElement("h3");
             item_name.innerText = item.name;
 
-             var item_action;
+             var item_action = null;
 
             var item_icon = document.createElement("img");
             switch (item.type) {
@@ -191,6 +214,17 @@ async function loadItems(){
                     item_action.innerText = "On/Off";
                     item_action.onclick = function() {
                         toggleSwitch(itemID);
+                    }
+                    break;
+
+                 case "doorbell":
+                    item_icon.src = "data/doorbell.png";
+                    item_icon.id= itemID + "_icon";
+
+                    item_action = document.createElement("button");
+                    item_action.innerText = "Ring";
+                    item_action.onclick = function() {
+                        pressDoorBell(itemID);
                     }
                     break;
             
@@ -207,7 +241,9 @@ async function loadItems(){
             item_card.appendChild(item_name);
             item_card.appendChild(item_icon);
             item_card.appendChild(item_id);
-            item_card.appendChild(item_action);
+            if(item_action){
+                item_card.appendChild(item_action);
+            }
 
             room_item_section.appendChild(item_card);
         }

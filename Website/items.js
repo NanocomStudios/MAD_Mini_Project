@@ -1,5 +1,15 @@
 items = [
     {
+        "room":"Outdoor",
+        "items":[
+                    {
+                        "id":6,
+                        "name":"front_bell",
+                        "type":"doorbell"
+                    }
+                ]
+    },
+    {
         "room":"Living Room",
         "items":[
                     {

@@ -7,9 +7,30 @@ from pydantic import BaseModel
 import hashlib
 import sqlite3
 
+import firebase_admin
+from firebase_admin import credentials, messaging
+
 import json
 
 from fastapi.middleware.cors import CORSMiddleware
+
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
+
+# message = messaging.Message(
+#     notification=messaging.Notification(title="Hello", body="Push via Python!"),
+#     token="YOUR_DEVICE_REGISTRATION_TOKEN", # Target specific device
+# )
+
+# response = messaging.send(message)
+# print("Successfully sent message:", response)
+
+
+# message = messaging.Message(
+#     notification=messaging.Notification(title="Broadcast", body="Hello users!"),
+#     topic="news", # Target topic
+# )
+# response = messaging.send(message)
 
 conn = sqlite3.connect('items.db')
 c = conn.cursor()
