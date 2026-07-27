@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "992092455522",
+    "project_id": "mad-mini-project-2a842",
+    "storage_bucket": "mad-mini-project-2a842.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:992092455522:android:085e625df769997c82073b",
+        "android_client_info": {
+          "package_name": "lk.nanocom.app.madminiproject"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCUxwKB0VJKusUaxPlIcCBG7zqlC7S_l0Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
