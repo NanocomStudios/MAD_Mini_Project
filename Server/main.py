@@ -7,6 +7,8 @@ from pydantic import BaseModel
 import hashlib
 import sqlite3
 
+import threading
+
 import firebase_admin
 from firebase_admin import credentials, messaging
 
@@ -111,6 +113,16 @@ client.connect(BROKER_URL, PORT, keepalive=60)
 # 6. Start the network loop in a background thread to handle incoming/outgoing messages
 client.loop_start()
 
+def itemUpdateLoop():
+    while True:
+        payload = {"request":"update"}
+        client.publish("broadcast/item" , payload=json.dumps(payload), qos=1)
+        time.sleep(600) # 10 minutes refresh
+
+itemUpdateThread = threading.Thread(target=itemUpdateLoop)
+itemUpdateThread.daemon = True
+itemUpdateThread.start()
+
 app = FastAPI()
 
 app.add_middleware(
@@ -197,6 +209,19 @@ def login(user: User):
     else:
         conn.close()
         return {"response": "failure"}
+
+@app.post("/user/logout")
+def logout(session: Session):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM sessions WHERE sessionID=?", (session.sessionID,))
+        conn.commit()
+        conn.close()
+        return {"response": "success"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error logging out!"}
 
 @app.post("/user/register")
 def register(user: User):

@@ -33,10 +33,10 @@ client.on('connect', () => {
 
 // 3. Handle Incoming Messages
 client.on('message', (topic, message) => {
+    console.log(`Received message on topic ${topic}: ${message.toString()}`);
     var topicList = topic.split("/");
     switch (topicList[0]) {
         case "item":
-            console.log("Item MSG :- " + topicList[1] + " > " + message);
             itemMsgHandler(topicList[1], message);
             break;
 
