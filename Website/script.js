@@ -127,7 +127,7 @@ function pressDoorBell(itemID){
     }
 }
 
-
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function registerItemOnServer(itemID, itemName, type){
     const payload = {
@@ -137,25 +137,30 @@ async function registerItemOnServer(itemID, itemName, type){
     }
 
     const url = "http://localhost:8000/item/register";
-    try{
-        const response = await fetch(url, {
-            method: "POST",
-            headers: {
-            "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
-        });
+    while(true){
+        try{
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
 
-        const data = await response.json();
-        if(data.response == "success"){
-            return data;
-        }else{
-            console.log("Error");
-            return null;
+            if (!response.ok) {
+                throw new Error(`Server status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if(data.response == "success"){
+                return data;
+            }else{
+                console.log("Error");
+                return null;
+            }
+        }catch (error){
+            await delay(5000); // Wait for 5 seconds before retrying
         }
-    }catch (error){
-        console.log("Error (catch)");
-        return null;
     }
 }
 
@@ -177,7 +182,7 @@ async function loadItems(){
         for(const item of Object.values(roomItems.items)){
             const itemID = item.id;
 
-            const response = await registerItemOnServer(item.id, item.name, item.type);
+            const response = registerItemOnServer(item.id, item.name, item.type);
             if(response){
                 if(response.itemName){
                     item.name = response.itemName;
