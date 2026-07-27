@@ -41,6 +41,7 @@ client.on('message', (topic, message) => {
             break;
 
         case "broadcast":
+            broadcastMsgHandler(topicList[1], message);
             break;
     
         default:
@@ -58,6 +59,17 @@ client.on('reconnect', () => {
     console.log('Attempting to reconnect...');
 });
 
+
+function broadcastMsgHandler(topic, message){
+    if(topic == "item"){
+        const msg = JSON.parse(message);
+        if(msg.request == "update"){
+            for(const item of Object.keys(itemList)){
+                updateItemOnServer(item, itemList[item].state);
+            }
+        }
+    }
+}
 
 function itemMsgHandler(itemID, message){
     const action = JSON.parse(message);
@@ -137,6 +149,40 @@ async function registerItemOnServer(itemID, itemName, type){
     }
 
     const url = "http://localhost:8000/item/register";
+    while(true){
+        try{
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if(data.response == "success"){
+                return data;
+            }else{
+                console.log("Error");
+                return null;
+            }
+        }catch (error){
+            await delay(5000); // Wait for 5 seconds before retrying
+        }
+    }
+}
+
+async function updateItemOnServer(itemID, value){
+    const payload = {
+        "itemID":itemID,
+        "value":value
+    }
+
+    const url = "http://localhost:8000/item/update";
     while(true){
         try{
             const response = await fetch(url, {

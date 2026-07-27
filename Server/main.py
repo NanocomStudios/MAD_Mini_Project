@@ -275,11 +275,18 @@ def itemAction(action: ItemAction):
         return {"response": "failure", "error": "Error: action on the item!"} 
 
 
-
 @app.post("/item/update")
 def itemUpdate(update: Update):
-    pass
-
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE items SET state=? WHERE itemID=?", (str(update.value), update.itemID))
+        conn.commit()
+        conn.close()
+        return {"response": "success"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error updating the item!"}
 
 @app.post("/app/action")
 def appAction(action: AppAction):
