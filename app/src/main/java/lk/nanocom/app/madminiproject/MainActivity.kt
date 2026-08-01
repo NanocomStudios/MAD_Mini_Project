@@ -212,12 +212,23 @@ fun SmartHomeApp() {
 
     NavHost(
         navController = navController,
-        startDestination = "floors",
+        startDestination = "login",
         enterTransition = { EnterTransition.None },
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },
         popExitTransition = { ExitTransition.None }
     ) {
+        composable("login") {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate("floors") {
+                        popUpTo("login") {
+                            inclusive = true
+                        }
+                    }
+                }
+            )
+        }
         composable("floors") {
             FloorListScreen(
                 floors = SampleData.floors,
