@@ -58,6 +58,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
 import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessaging
 
@@ -134,7 +135,7 @@ object SampleData {
                         Device.Outlet("d1", "TV Outlet", isOn = true, status = DeviceStatus.ON),
                         Device.MultiSwitch(
                             "d2", "Wall Gang Box",
-                            switches = listOf(
+                            switches = mutableListOf(
                                 SwitchNode("s1", true),
                                 SwitchNode("s2", false),
                                 SwitchNode("s3", false)
@@ -184,7 +185,7 @@ sealed class Device {
     data class MultiSwitch(
         val id: String,
         val name: String,
-        val switches: List<SwitchNode>,
+        val switches: MutableList<SwitchNode>,
         var status: DeviceStatus
     ) : Device()
 
@@ -266,8 +267,49 @@ fun SmartHomeApp() {
                 onBack = { navController.popBackStack() },
                 onToggleDevice = {},
                 onAddDeviceClick = {},
-                onDeleteDeviceClick = {}
+                onDeleteDeviceClick = {},
+                onMultiSwitchClick = { deviceId ->
+                    navController.navigate("floors/$floorId/rooms/$roomId/multiswitch/$deviceId")
+                }
             )
+        }
+
+        composable(
+            "floors/{floorId}/rooms/{roomId}/multiswitch/{deviceId}",
+            arguments = listOf(
+                navArgument("floorId") { type = NavType.StringType },
+                navArgument("roomId") { type = NavType.StringType },
+                navArgument("deviceId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
+            val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
+            val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
+
+            val floor = SampleData.floors.first { it.id == floorId }
+            val room = floor.rooms.first { it.id == roomId }
+            val device = room.devices.find { deviceIdOf(it) == deviceId } as? Device.MultiSwitch
+
+            if (device != null) {
+                MultiSwitchDetailScreen(
+                    multiSwitch = device,
+                    onBack = { navController.popBackStack() },
+                    onSwitchToggle = { switchId ->
+                        val switch = device.switches.find { it.id == switchId }
+                        switch?.let {
+                            val index = device.switches.indexOf(it)
+                            device.switches[index] = it.copy(isOn = !it.isOn)
+                            device.status = if (device.switches.any { it.isOn }) {
+                                DeviceStatus.ON
+                            } else {
+                                DeviceStatus.OFF
+                            }
+                        }
+                    }
+                )
+            } else {
+                navController.popBackStack()
+            }
         }
     }
 }
@@ -419,12 +461,118 @@ fun RoomListScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+fun MultiSwitchDetailScreen(
+    multiSwitch: Device.MultiSwitch,
+    onBack: () -> Unit,
+    onSwitchToggle: (String) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("${multiSwitch.name} - Switches") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        when (multiSwitch.status) {
+                            DeviceStatus.ON -> Color(0xFF4CAF50)
+                            DeviceStatus.OFF -> Color(0xFF9E9E9E)
+                            DeviceStatus.ERROR -> Color(0xFFF44336)
+                            DeviceStatus.DISCONNECTED -> Color(0xFFFF9800)
+                        },
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "Device Status: ${multiSwitch.status.name}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
+            Text(
+                text = "${multiSwitch.switches.count { it.isOn }}/${multiSwitch.switches.size} switches ON",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(multiSwitch.switches) { switch ->
+                    SwitchItem(
+                        switch = switch,
+                        onToggle = { onSwitchToggle(switch.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SwitchItem(
+    switch: SwitchNode,
+    onToggle: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Switch ${switch.id.takeLast(1)}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = if (switch.isOn) "ON" else "OFF",
+                    color = if (switch.isOn) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = switch.isOn,
+                onCheckedChange = { onToggle() }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun DeviceGridScreen(
     room: Room,
     onBack: () -> Unit,
     onToggleDevice: (String) -> Unit,
     onAddDeviceClick: () -> Unit,
-    onDeleteDeviceClick: (String) -> Unit
+    onDeleteDeviceClick: (String) -> Unit,
+    onMultiSwitchClick: (String) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -462,7 +610,12 @@ fun DeviceGridScreen(
                 DeviceCard(
                     device = device,
                     onToggle = { onToggleDevice(deviceId) },
-                    onDelete = { onDeleteDeviceClick(deviceId) }
+                    onDelete = { onDeleteDeviceClick(deviceId) },
+                    onMultiSwitchClick = {
+                        if (device is Device.MultiSwitch) {
+                            onMultiSwitchClick(deviceId)
+                        }
+                    }
                 )
             }
         }
@@ -480,12 +633,18 @@ fun deviceIdOf(device: Device): String = when (device) {
 fun DeviceCard(
     device: Device,
     onToggle: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMultiSwitchClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .aspectRatio(1f)
-            .clickable(enabled = device !is Device.Camera) { onToggle() },
+            .clickable {
+                when (device) {
+                    is Device.MultiSwitch -> onMultiSwitchClick()
+                    else -> onToggle()
+                }
+            },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
