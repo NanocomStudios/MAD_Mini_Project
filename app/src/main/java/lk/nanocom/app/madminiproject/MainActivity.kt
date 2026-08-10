@@ -1,6 +1,7 @@
 package lk.nanocom.app.madminiproject
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -60,6 +61,7 @@ import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import com.google.firebase.messaging.FirebaseMessaging
 
 
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             MADMiniProjectTheme {
                 SmartHomeApp()
@@ -92,6 +95,11 @@ class MainActivity : ComponentActivity() {
 
             // Get the initial/current FCM registration token
             val token = task.result
+            val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+            sharedPref.edit {
+                putString("firebase_token", token)
+            }
+
             Log.d("FCM", "Device Token: $token")
 
             // TODO: Send token to your backend server

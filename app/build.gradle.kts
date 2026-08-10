@@ -36,7 +36,16 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        resources {
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/io.netty.versions.properties"
+        }
+    }
 }
+
+
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
@@ -52,6 +61,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
+    implementation(libs.firebase.appdistribution.gradle)
     implementation(libs.firebase.messaging)
     implementation(libs.material.icons.extended)
     testImplementation(libs.junit)
@@ -63,4 +73,12 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(platform(libs.firebase.bom))
     implementation("com.google.firebase:firebase-analytics")
+    // Retrofit
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    // Gson Converter for JSON parsing
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    // Kotlin Coroutines for asynchronous network operations
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
 }

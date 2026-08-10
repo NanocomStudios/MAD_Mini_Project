@@ -1,5 +1,7 @@
 package lk.nanocom.app.madminiproject
 
+import android.util.Log
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,17 +31,55 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.edit
+import retrofit2.Response
+import retrofit2.http.Body
+import retrofit2.http.POST
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import kotlinx.coroutines.launch
+object RetrofitClient {
+    private const val BASE_URL = "https://api.nanocom.lk"
+
+    val apiService: ApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ApiService::class.java)
+    }
+}
+
+data class LoginRequest(
+    val username: String,
+    val password: String,
+    val deviceID: String?
+)
+
+data class LoginResponse(
+    val response: String,
+    val sessionID: String?,
+    val userID: Int
+)
+
+interface ApiService {
+    @POST("user/login")
+    suspend fun loginPostRequest(@Body request: LoginRequest): Response<LoginResponse>
+}
 
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit
 ) {
+    val context = LocalContext.current
 
-    var username by remember {
+    var uname by remember {
         mutableStateOf("")
     }
 
-    var password by remember {
+    var passwd by remember {
         mutableStateOf("")
     }
 
@@ -50,6 +90,8 @@ fun LoginScreen(
     var loginError by remember {
         mutableStateOf(false)
     }
+
+    val coroutineScope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -79,9 +121,9 @@ fun LoginScreen(
             )
 
             OutlinedTextField(
-                value = username,
+                value = uname,
                 onValueChange = {
-                    username = it
+                    uname = it
                     loginError = false
                 },
                 label = {
@@ -92,9 +134,9 @@ fun LoginScreen(
             )
 
             OutlinedTextField(
-                value = password,
+                value = passwd,
                 onValueChange = {
-                    password = it
+                    passwd = it
                     loginError = false
                 },
                 label = {
@@ -140,19 +182,49 @@ fun LoginScreen(
 
             Button(
                 onClick = {
+                    val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                    val req = LoginRequest(
+                        username = uname,
+                        password = passwd,
+                        deviceID = sharedPref.getString("firebase_token", "")
+                    )
 
-                    if (username == "mad" && password == "asd") {
-                        onLoginSuccess()
-                    } else {
-                        loginError = true
+                    // Execute inside a coroutine tied to this composable's lifecycle
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.loginPostRequest(req)
+
+                            if (response.isSuccessful && response.body() != null) {
+                                val responseBody = response.body()
+                                Log.d("API_SUCCESS", "Login Successful! ID: ${responseBody?.response}")
+                                if(responseBody?.response == "success"){
+                                    sharedPref.edit{
+                                        putString("sessionID", responseBody?.sessionID)
+                                        val userID: Int = responseBody?.userID?.toInt() ?: 0
+
+                                        putInt("userID", userID)
+                                    }
+                                    onLoginSuccess()
+                                }else{
+                                    loginError = true
+                                }
+
+                            } else {
+                                Log.e("API_ERROR", "Error Code: ${response.code()}")
+                                loginError = true
+                            }
+                        } catch (e: Exception) {
+                            Log.e("API_FAILURE", "Network error occurred", e)
+                            loginError = true
+                        }
                     }
-
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
             ) {
                 Text("LOGIN")
+
             }
         }
     }
