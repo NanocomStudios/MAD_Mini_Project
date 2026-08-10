@@ -1,4 +1,4 @@
-const ROOT = "http://localhost:8000"
+const ROOT = "https://api.nanocom.lk"
 
 var itemList = {};
 
@@ -102,7 +102,7 @@ function toggleSwitch(itemID){
 
     switchLight(itemID, value);
 
-    const url = "http://localhost:8000/item/action";
+    const url = ROOT + "/item/action";
     try{
         fetch(url, {
             method: "POST",
@@ -124,7 +124,7 @@ function pressDoorBell(itemID){
         "value":1
     }
 
-    const url = "http://localhost:8000/item/action";
+    const url = ROOT + "/item/action";
     try{
         fetch(url, {
             method: "POST",
@@ -148,7 +148,7 @@ async function registerItemOnServer(itemID, itemName, type){
         "itemType":type
     }
 
-    const url = "http://localhost:8000/item/register";
+    const url = ROOT + "/item/register";
     while(true){
         try{
             const response = await fetch(url, {
@@ -182,7 +182,7 @@ async function updateItemOnServer(itemID, value){
         "value":value
     }
 
-    const url = "http://localhost:8000/item/update";
+    const url = ROOT + "/item/update";
     while(true){
         try{
             const response = await fetch(url, {
