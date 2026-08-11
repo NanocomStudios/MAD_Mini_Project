@@ -235,6 +235,17 @@ fun SmartHomeApp() {
                             inclusive = true
                         }
                     }
+                },
+                onRegisterClick = {
+                    navController.navigate("register")
+                }
+            )
+        }
+
+        composable("register") {
+            RegisterScreen(
+                onRegisterSuccess = {
+                    navController.popBackStack()
                 }
             )
         }

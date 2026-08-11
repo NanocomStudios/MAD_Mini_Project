@@ -40,22 +40,21 @@ import retrofit2.http.POST
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import kotlinx.coroutines.launch
-data class LoginRequest(
+data class RegisterRequest(
     val username: String,
     val password: String,
     val deviceID: String?
 )
 
-data class LoginResponse(
+data class RegisterResponse(
     val response: String,
-    val sessionID: String?,
-    val userID: Int
+    val msg: String?
 )
 
+
 @Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit,
-    onRegisterClick: () -> Unit
+fun RegisterScreen(
+    onRegisterSuccess: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -67,11 +66,23 @@ fun LoginScreen(
         mutableStateOf("")
     }
 
+    var passwd_v by remember {
+        mutableStateOf("")
+    }
+
     var passwordVisible by remember {
         mutableStateOf(false)
     }
 
-    var loginError by remember {
+    var registerError by remember {
+        mutableStateOf(false)
+    }
+
+    var registerErrorMsg by remember {
+        mutableStateOf("")
+    }
+
+    var passwdMismatch by remember {
         mutableStateOf(false)
     }
 
@@ -100,7 +111,7 @@ fun LoginScreen(
 
             Text(
                 color = Color(0xFFFFFFFF),
-                text = "Login",
+                text = "Register",
                 style = MaterialTheme.typography.titleLarge
             )
 
@@ -108,7 +119,8 @@ fun LoginScreen(
                 value = uname,
                 onValueChange = {
                     uname = it
-                    loginError = false
+                    registerError = false
+                    passwdMismatch = false
                 },
                 label = {
                     Text("Username")
@@ -121,7 +133,8 @@ fun LoginScreen(
                 value = passwd,
                 onValueChange = {
                     passwd = it
-                    loginError = false
+                    registerError = false
+                    passwdMismatch = false
                 },
                 label = {
                     Text("Password")
@@ -157,9 +170,50 @@ fun LoginScreen(
                 }
             )
 
-            if (loginError) {
+            OutlinedTextField(
+                value = passwd_v,
+                onValueChange = {
+                    passwd_v = it
+                    registerError = false
+                    passwdMismatch = false
+                },
+                label = {
+                    Text("Reenter Password")
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (passwordVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                trailingIcon = {
+
+                    IconButton(
+                        onClick = {
+                            passwordVisible = !passwordVisible
+                        }
+                    ) {
+
+                        Icon(
+                            imageVector = if (passwordVisible) {
+                                Icons.Default.VisibilityOff
+                            } else {
+                                Icons.Default.Visibility
+                            },
+                            contentDescription = if (passwordVisible) {
+                                "Hide password"
+                            } else {
+                                "Show password"
+                            }
+                        )
+                    }
+                }
+            )
+
+            if (registerError) {
                 Text(
-                    text = "Invalid username or password",
+                    text = registerErrorMsg,
                     color = MaterialTheme.colorScheme.error
                 )
             }
@@ -167,7 +221,7 @@ fun LoginScreen(
             Button(
                 onClick = {
                     val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
-                    val req = LoginRequest(
+                    val req = RegisterRequest(
                         username = uname,
                         password = passwd,
                         deviceID = sharedPref.getString("firebase_token", "")
@@ -176,44 +230,32 @@ fun LoginScreen(
                     // Execute inside a coroutine tied to this composable's lifecycle
                     coroutineScope.launch {
                         try {
-                            val response = RetrofitClient.apiService.loginPostRequest(req)
+                            val response = RetrofitClient.apiService.registerPostRequest(req)
 
                             if (response.isSuccessful && response.body() != null) {
                                 val responseBody = response.body()
                                 Log.d("API_SUCCESS", "Login Successful! ID: ${responseBody?.response}")
                                 if(responseBody?.response == "success"){
-                                    sharedPref.edit{
-                                        putString("sessionID", responseBody?.sessionID)
-                                        val userID: Int = responseBody?.userID?.toInt() ?: 0
-
-                                        putInt("userID", userID)
-                                    }
-                                    onLoginSuccess()
+                                    onRegisterSuccess()
+                                }else if(responseBody?.response == "failure"){
+                                    registerErrorMsg = responseBody?.msg.orEmpty()
+                                    registerError = true
                                 }else{
-                                    loginError = true
+                                    registerErrorMsg = "Server Connection Error"
+                                    registerError = true
                                 }
 
                             } else {
                                 Log.e("API_ERROR", "Error Code: ${response.code()}")
-                                loginError = true
+                                registerErrorMsg = "Server Connection Error"
+                                registerError = true
                             }
                         } catch (e: Exception) {
                             Log.e("API_FAILURE", "Network error occurred", e)
-                            loginError = true
+                            registerErrorMsg = "Network error occurred"
+                            registerError = true
                         }
                     }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Text("LOGIN")
-
-            }
-
-            Button(
-                onClick = {
-                    onRegisterClick()
                 },
                 modifier = Modifier
                     .fillMaxWidth()
