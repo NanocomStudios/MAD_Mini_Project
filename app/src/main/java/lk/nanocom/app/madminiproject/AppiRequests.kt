@@ -10,4 +10,7 @@ interface ApiService {
 
     @POST("user/register")
     suspend fun registerPostRequest(@Body request: RegisterRequest): Response<RegisterResponse>
+
+    @POST("user/validateSession")
+    suspend fun validateSessionPostRequest(@Body request: SessionIDRequest): Response<STDResponse>
 }

@@ -236,6 +236,10 @@ def register(user: User):
         conn.close()
         return {"response": "failure", "error": "Username already exists"}
 
+@app.post("/user/validateSession")
+def validateSession(session: Session):
+    return {"response": "success"} if isSessionValid(session.sessionID) else {"response": "failure"}
+
 @app.post("/item/register")
 def itemRegister(item: Item):
     conn = sqlite3.connect('items.db')
@@ -521,7 +525,12 @@ def appGetRooms(session: Session):
                 roomName = room[1]
                 c.execute("SELECT itemID FROM room_items WHERE roomID=?", (roomID,))
                 items = c.fetchall()
-                itemIDs = [item[0] for item in items]
+                itemIDs = []
+                for item in items:
+                    c.execute("SELECT * FROM items WHERE itemID=?", (item[0],))
+                    item_data = c.fetchone()
+                    if item_data:
+                        itemIDs.append({"itemID": item_data[0], "itemName": item_data[1], "type": item_data[2], "state": item_data[3]})
                 room_list.append({"roomName": roomName, "itemIDs": itemIDs})
 
             conn.close()

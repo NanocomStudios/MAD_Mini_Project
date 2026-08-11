@@ -60,10 +60,23 @@ import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
+data class SessionIDRequest(
+    val sessionID: String
+)
+
+data class STDResponse(
+    val response: String,
+    val error: String?
+)
 
 class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
@@ -80,9 +93,38 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        val isSessionValidated = mutableStateOf<Boolean?>(null)
+        val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String? = sharedPref.getString("sessionID", "")
+
+        if (savedSessionID.isNullOrEmpty()) {
+            isSessionValidated.value = false
+        } else {
+            val req = SessionIDRequest(sessionID = savedSessionID)
+            lifecycleScope.launch {
+                try {
+                    val response = RetrofitClient.apiService.validateSessionPostRequest(req)
+                    if (response.isSuccessful && response.body()?.response == "success") {
+                        isSessionValidated.value = true
+                    } else {
+                        isSessionValidated.value = false
+                    }
+                } catch (e: Exception) {
+                    isSessionValidated.value = false
+                }
+            }
+        }
+
         setContent {
             MADMiniProjectTheme {
-                SmartHomeApp()
+                val validated = isSessionValidated.value
+                if (validated == null) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Loading...")
+                    }
+                } else {
+                    SmartHomeApp(startDestination = if (validated) "floors" else "login")
+                }
             }
         }
 
@@ -216,12 +258,12 @@ enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SmartHomeApp() {
+fun SmartHomeApp(startDestination: String = "login") {
     val navController = rememberNavController()
 
     NavHost(
         navController = navController,
-        startDestination = "login",
+        startDestination = startDestination,
         enterTransition = { EnterTransition.None },
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },

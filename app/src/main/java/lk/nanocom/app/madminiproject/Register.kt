@@ -48,7 +48,7 @@ data class RegisterRequest(
 
 data class RegisterResponse(
     val response: String,
-    val msg: String?
+    val error: String?
 )
 
 
@@ -218,42 +218,63 @@ fun RegisterScreen(
                 )
             }
 
+            if (passwdMismatch) {
+                Text(
+                    text = "Passwords do not match!",
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
             Button(
                 onClick = {
-                    val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
-                    val req = RegisterRequest(
-                        username = uname,
-                        password = passwd,
-                        deviceID = sharedPref.getString("firebase_token", "")
-                    )
+                    if(passwd != passwd_v){
+                        passwdMismatch = true
+                    }else {
 
-                    // Execute inside a coroutine tied to this composable's lifecycle
-                    coroutineScope.launch {
-                        try {
-                            val response = RetrofitClient.apiService.registerPostRequest(req)
+                        val sharedPref =
+                            context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                        val req = RegisterRequest(
+                            username = uname,
+                            password = passwd,
+                            deviceID = sharedPref.getString("firebase_token", "")
+                        )
 
-                            if (response.isSuccessful && response.body() != null) {
-                                val responseBody = response.body()
-                                Log.d("API_SUCCESS", "Login Successful! ID: ${responseBody?.response}")
-                                if(responseBody?.response == "success"){
-                                    onRegisterSuccess()
-                                }else if(responseBody?.response == "failure"){
-                                    registerErrorMsg = responseBody?.msg.orEmpty()
-                                    registerError = true
-                                }else{
+                        // Execute inside a coroutine tied to this composable's lifecycle
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.registerPostRequest(req)
+
+                                if (response.isSuccessful && response.body() != null) {
+                                    val responseBody = response.body()
+                                    Log.d(
+                                        "API_SUCCESS",
+                                        "Registration Successful! ID: ${responseBody?.response}"
+                                    )
+                                    if (responseBody?.response == "success") {
+                                        onRegisterSuccess()
+                                    } else if (responseBody?.response == "failure") {
+                                        if (responseBody?.error == null) {
+                                            registerErrorMsg = "Registration Failed!"
+                                        } else {
+                                            registerErrorMsg = responseBody?.error.orEmpty()
+                                        }
+
+                                        registerError = true
+                                    } else {
+                                        registerErrorMsg = "Server Connection Error"
+                                        registerError = true
+                                    }
+
+                                } else {
+                                    Log.e("API_ERROR", "Error Code: ${response.code()}")
                                     registerErrorMsg = "Server Connection Error"
                                     registerError = true
                                 }
-
-                            } else {
-                                Log.e("API_ERROR", "Error Code: ${response.code()}")
-                                registerErrorMsg = "Server Connection Error"
+                            } catch (e: Exception) {
+                                Log.e("API_FAILURE", "Network error occurred", e)
+                                registerErrorMsg = "Network error occurred"
                                 registerError = true
                             }
-                        } catch (e: Exception) {
-                            Log.e("API_FAILURE", "Network error occurred", e)
-                            registerErrorMsg = "Network error occurred"
-                            registerError = true
                         }
                     }
                 },
