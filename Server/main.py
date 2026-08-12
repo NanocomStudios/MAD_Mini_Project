@@ -141,6 +141,11 @@ class User(BaseModel):
 class Session(BaseModel):
     sessionID: str
 
+class FirebaseToken(BaseModel):
+    userID: int
+    firebaseToken: str
+    sessionID: str
+
 class Item(BaseModel):
     itemID: int
     itemName: str
@@ -239,6 +244,22 @@ def register(user: User):
 @app.post("/user/validateSession")
 def validateSession(session: Session):
     return {"response": "success"} if isSessionValid(session.sessionID) else {"response": "failure"}
+
+@app.post("/user/updateFirebaseToken")
+def updateFirebaseToken(token: FirebaseToken):
+    if not isSessionValid(token.sessionID):
+        return {"response": "failure", "error": "Invalid session ID!"}
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE sessions SET deviceID=? WHERE userID=?", (token.firebaseToken, token.userID))
+        conn.commit()
+        conn.close()
+        return {"response": "success"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error updating Firebase token!"}
 
 @app.post("/item/register")
 def itemRegister(item: Item):

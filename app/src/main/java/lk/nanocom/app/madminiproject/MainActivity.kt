@@ -60,6 +60,9 @@ import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material3.Button
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
@@ -70,6 +73,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 data class SessionIDRequest(
+    val sessionID: String
+)
+
+data class FirebaseTokenUpdateRequest(
+    val userID: Int,
+    val firebaseToken: String,
     val sessionID: String
 )
 
@@ -86,6 +95,48 @@ class MainActivity : ComponentActivity() {
             // Permission allowed: App can show notifications
         } else {
             // Permission denied: Inform the user
+        }
+    }
+
+    fun updateFirebaseToken(){
+
+        askNotificationPermission()
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                Log.w("FCM", "Fetching FCM registration token failed", task.exception)
+                return@addOnCompleteListener
+            }
+
+            // Get the initial/current FCM registration token
+            val token = task.result
+            val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+            sharedPref.edit {
+                putString("firebase_token", token)
+            }
+
+            Log.d("FCM", "Device Token: $token")
+
+        }
+
+        val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String? = sharedPref.getString("sessionID", "")
+
+        val req = FirebaseTokenUpdateRequest(
+            userID = sharedPref.getInt("userID", 0),
+            firebaseToken = sharedPref.getString("firebase_token", "") ?: "",
+            sessionID = sharedPref.getString("sessionID", "") ?: ""
+        )
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.apiService.updateFirebaseTokenPostRequest(req)
+                if (response.isSuccessful && response.body()?.response == "success") {
+                    Log.d("FCM", "Firebase token updated successfully")
+                } else {
+                    Log.d("FCM", "Firebase token update failed")
+                }
+            } catch (e: Exception) {
+                Log.d("FCM", "Firebase token update failed")
+            }
         }
     }
 
@@ -106,6 +157,9 @@ class MainActivity : ComponentActivity() {
                     val response = RetrofitClient.apiService.validateSessionPostRequest(req)
                     if (response.isSuccessful && response.body()?.response == "success") {
                         isSessionValidated.value = true
+
+                        updateFirebaseToken()
+
                     } else {
                         isSessionValidated.value = false
                     }
@@ -123,29 +177,15 @@ class MainActivity : ComponentActivity() {
                         Text("Loading...")
                     }
                 } else {
-                    SmartHomeApp(startDestination = if (validated) "floors" else "login")
+                    SmartHomeApp(
+                        startDestination = if (validated) "floors" else "login",
+                        updateFirebaseToken = ::updateFirebaseToken
+                    )
                 }
             }
         }
 
-        askNotificationPermission()
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
-                Log.w("FCM", "Fetching FCM registration token failed", task.exception)
-                return@addOnCompleteListener
-            }
 
-            // Get the initial/current FCM registration token
-            val token = task.result
-            val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
-            sharedPref.edit {
-                putString("firebase_token", token)
-            }
-
-            Log.d("FCM", "Device Token: $token")
-
-            // TODO: Send token to your backend server
-        }
     }
 
     private fun askNotificationPermission() {
@@ -258,7 +298,10 @@ enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SmartHomeApp(startDestination: String = "login") {
+fun SmartHomeApp(
+    startDestination: String = "login",
+    updateFirebaseToken: () -> Unit
+) {
     val navController = rememberNavController()
 
     NavHost(
@@ -277,6 +320,7 @@ fun SmartHomeApp(startDestination: String = "login") {
                             inclusive = true
                         }
                     }
+                    updateFirebaseToken()
                 },
                 onRegisterClick = {
                     navController.navigate("register")
@@ -296,7 +340,15 @@ fun SmartHomeApp(startDestination: String = "login") {
                 floors = SampleData.floors,
                 onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
                 onAddFloorClick = {},
-                onDeleteFloorClick = {}
+                onDeleteFloorClick = {},
+                onLogoutClick = {
+
+                    navController.navigate("login") {
+                        popUpTo("floors") {
+                            inclusive = true
+                        }
+                    }
+                }
             )
         }
         composable(
@@ -381,10 +433,22 @@ fun FloorListScreen(
     floors: List<Floor>,
     onFloorClick: (String) -> Unit,
     onAddFloorClick: () -> Unit,
-    onDeleteFloorClick: (String) -> Unit
+    onDeleteFloorClick: (String) -> Unit,
+    onLogoutClick: () -> Unit
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Floors") }) },
+        topBar = {
+            TopAppBar(title = { Text("Floors") },
+            actions = {
+                IconButton(onClick = onLogoutClick) {
+                    Icon(
+                        imageVector = Icons.Default.ExitToApp,
+                        contentDescription = "Logout"
+                    )
+                }
+            }
+        )
+                 },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onAddFloorClick,
@@ -396,6 +460,7 @@ fun FloorListScreen(
                     contentDescription = "Add Floor"
                 )
             }
+
         }
     ) { padding ->
         LazyColumn(
@@ -776,10 +841,10 @@ fun StatusBadge(status: DeviceStatus) {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun SmartHomeAppPreview() {
-    MADMiniProjectTheme {
-        SmartHomeApp()
-    }
-}
+//@Preview(showBackground = true)
+//@Composable
+//fun SmartHomeAppPreview() {
+//    MADMiniProjectTheme {
+//        SmartHomeApp()
+//    }
+//}

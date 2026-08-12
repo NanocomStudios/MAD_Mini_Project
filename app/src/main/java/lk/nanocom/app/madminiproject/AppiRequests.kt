@@ -13,4 +13,10 @@ interface ApiService {
 
     @POST("user/validateSession")
     suspend fun validateSessionPostRequest(@Body request: SessionIDRequest): Response<STDResponse>
+
+    @POST("user/updateFirebaseToken")
+    suspend fun updateFirebaseTokenPostRequest(@Body request: FirebaseTokenUpdateRequest): Response<STDResponse>
+
+    @POST("user/logout")
+    suspend fun logoutPostRequest(@Body request: SessionIDRequest): Response<STDResponse>
 }
