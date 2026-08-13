@@ -1,4 +1,5 @@
-const ROOT = "https://api.nanocom.lk"
+const ROOT = "http://localhost:8000"
+// const ROOT = "https://api.nanocom.lk"
 
 var itemList = {};
 

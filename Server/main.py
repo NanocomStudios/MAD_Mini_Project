@@ -54,8 +54,8 @@ c.execute("CREATE TABLE IF NOT EXISTS items (\
 c.execute("CREATE TABLE IF NOT EXISTS rooms (\
             roomID INTEGER PRIMARY KEY AUTOINCREMENT,\
             roomName TEXT NOT NULL,\
-            userID INTEGER NOT NULL,\
-            FOREIGN KEY(userID) REFERENCES users(userID)\
+            floorID INTEGER NOT NULL,\
+            FOREIGN KEY(floorID) REFERENCES floors(floorID)\
           )")
 
 c.execute("CREATE TABLE IF NOT EXISTS room_items (\
@@ -65,6 +65,13 @@ c.execute("CREATE TABLE IF NOT EXISTS room_items (\
             FOREIGN KEY(roomID) REFERENCES rooms(roomID),\
             FOREIGN KEY(itemID) REFERENCES items(itemID)\
             )")
+
+c.execute("CREATE TABLE IF NOT EXISTS floors (\
+            floorID INTEGER PRIMARY KEY AUTOINCREMENT,\
+            floorName TEXT NOT NULL,\
+            userID INTEGER NOT NULL,\
+            FOREIGN KEY(userID) REFERENCES users(userID)\
+          )")
 
 
 
@@ -157,11 +164,17 @@ class AppAction(BaseModel):
     value: int
     sessionID: str
 
+class AppFloor(BaseModel):
+    floorName: str
+    sessionID: str
+
 class AppRoom(BaseModel):
+    floorName: str
     roomName: str
     sessionID: str
 
 class RoomItem(BaseModel):
+    floorName: str
     roomName: str
     itemID: int
     sessionID: str
@@ -387,6 +400,68 @@ def appAction(action: AppAction):
         conn.close()
         return {"response": "failure", "error": "Error: action on the item!"}
 
+@app.post("/app/newFloor")
+def appNewFloor(floor: AppFloor):
+
+    is_valid = isSessionValid(floor.sessionID)
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+
+        if(is_valid):
+            c.execute("SELECT * FROM sessions WHERE sessionID=?", (floor.sessionID,))
+            session = c.fetchone()
+            userID = session[1]
+
+            c.execute("INSERT INTO floors (floorName, userID) VALUES (?, ?)", (floor.floorName, userID))
+            conn.commit()
+            conn.close()
+
+            return {"response": "success", "floorName": floor.floorName}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Invalid session ID!"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: creating new floor!"}
+
+@app.post("/app/deleteFloor")
+def appDeleteFloor(floor: AppFloor):
+
+    is_valid = isSessionValid(floor.sessionID)
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+
+        if(is_valid):
+            c.execute("SELECT * FROM sessions WHERE sessionID=?", (floor.sessionID,))
+            session = c.fetchone()
+            userID = session[1]
+
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (floor.floorName, userID))
+            floor_data = c.fetchone()
+            if not floor_data:
+                conn.close()
+                return {"response": "failure", "error": "Floor not found!"}
+
+            floorID = floor_data[0]
+
+            c.execute("DELETE FROM room_items WHERE roomID IN (SELECT roomID FROM rooms WHERE floorID=?)", (floorID,))
+            c.execute("DELETE FROM rooms WHERE floorID=?", (floorID,))
+            c.execute("DELETE FROM floors WHERE floorName=? AND userID=?", (floor.floorName, userID))
+            conn.commit()
+            conn.close()
+
+            return {"response": "success", "floorName": floor.floorName}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Invalid session ID!"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: deleting the floor!"}
+
 @app.post("/app/newRoom")
 def appNewRoom(room: AppRoom):
 
@@ -401,7 +476,15 @@ def appNewRoom(room: AppRoom):
             session = c.fetchone()
             userID = session[1]
 
-            c.execute("INSERT INTO rooms (roomName, userID) VALUES (?, ?)", (room.roomName, userID))
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (room.floorName, userID))
+            floor = c.fetchone()
+            if not floor:
+                conn.close()
+                return {"response": "failure", "error": "Floor not found!"}
+
+            floorID = floor[0]
+
+            c.execute("INSERT INTO rooms (roomName, floorID) VALUES (?, ?)", (room.roomName, floorID))
             conn.commit()
             conn.close()
 
@@ -427,12 +510,25 @@ def appDeleteRoom(room: AppRoom):
             session = c.fetchone()
             userID = session[1]
 
-            c.execute("SELECT * FROM room_items WHERE roomID=(SELECT roomID FROM rooms WHERE roomName=? AND userID=?)", (room.roomName, userID))
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (room.floorName, userID))
+            floor = c.fetchone()
+            if not floor:
+                conn.close()
+                return {"response": "failure", "error": "Floor not found!"}
+            floorID = floor[0]
+
+            c.execute("SELECT * FROM rooms WHERE roomName=? AND floorID=?", (room.roomName, floorID))
+            room_data = c.fetchone()
+            if not room_data:
+                conn.close()
+                return {"response": "failure", "error": "Room not found!"}
+
+            c.execute("SELECT * FROM room_items WHERE roomID=(SELECT roomID FROM rooms WHERE roomName=? AND floorID=?)", (room.roomName, floorID))
             items = c.fetchall()
             for item in items:
                 c.execute("DELETE FROM room_items WHERE roomID=? AND itemID=?", (item[0], item[1]))
 
-            c.execute("DELETE FROM rooms WHERE roomName=? AND userID=?", (room.roomName, userID))
+            c.execute("DELETE FROM rooms WHERE roomName=? AND floorID=?", (room.roomName, floorID))
             conn.commit()
             conn.close()
 
@@ -471,7 +567,14 @@ def appAddItemToRoom(roomItem: RoomItem):
             session = c.fetchone()
             userID = session[1]
 
-            c.execute("SELECT * FROM rooms WHERE roomName=? AND userID=?", (roomItem.roomName, userID))
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (roomItem.floorName, userID))
+            floor = c.fetchone()
+            if not floor:
+                conn.close()
+                return {"response": "failure", "error": "Floor not found!"}
+            floorID = floor[0]
+
+            c.execute("SELECT * FROM rooms WHERE roomName=? AND floorID=?", (roomItem.roomName, floorID))
             room = c.fetchone()
             if room:
                 roomID = room[0]
@@ -503,7 +606,14 @@ def appRemoveItemFromRoom(roomItem: RoomItem):
             session = c.fetchone()
             userID = session[1]
 
-            c.execute("SELECT * FROM rooms WHERE roomName=? AND userID=?", (roomItem.roomName, userID))
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (roomItem.floorName, userID))
+            floor = c.fetchone()
+            if not floor:
+                conn.close()
+                return {"response": "failure", "error": "Floor not found!"}
+            floorID = floor[0]
+
+            c.execute("SELECT * FROM rooms WHERE roomName=? AND floorID=?", (roomItem.roomName, floorID))
             room = c.fetchone()
             if room:
                 roomID = room[0]
@@ -537,25 +647,35 @@ def appGetRooms(session: Session):
             session_data = c.fetchone()
             userID = session_data[1]
 
-            c.execute("SELECT * FROM rooms WHERE userID=?", (userID,))
-            rooms = c.fetchall()
+            c.execute("SELECT * FROM floors WHERE userID=?", (userID,))
+            floors = c.fetchall()
 
-            room_list = []
-            for room in rooms:
-                roomID = room[0]
-                roomName = room[1]
-                c.execute("SELECT itemID FROM room_items WHERE roomID=?", (roomID,))
-                items = c.fetchall()
-                itemIDs = []
-                for item in items:
-                    c.execute("SELECT * FROM items WHERE itemID=?", (item[0],))
-                    item_data = c.fetchone()
-                    if item_data:
-                        itemIDs.append({"itemID": item_data[0], "itemName": item_data[1], "type": item_data[2], "state": item_data[3]})
-                room_list.append({"roomName": roomName, "itemIDs": itemIDs})
+            floor_list = []
+            for floor in floors:
+                floorID = floor[0]
+                floorName = floor[1]
+                c.execute("SELECT * FROM rooms WHERE floorID=?", (floorID,))
+                rooms = c.fetchall()
+
+                room_list = []
+                for room in rooms:
+                    roomID = room[0]
+                    roomName = room[1]
+                    c.execute("SELECT itemID FROM room_items WHERE roomID=?", (roomID,))
+                    items = c.fetchall()
+                    itemIDs = []
+                    for item in items:
+                        c.execute("SELECT * FROM items WHERE itemID=?", (item[0],))
+                        item_data = c.fetchone()
+                        if item_data:
+                            itemIDs.append({"itemID": item_data[0], "itemName": item_data[1], "type": item_data[2], "state": item_data[3]})
+                    room_list.append({"roomName": roomName, "itemIDs": itemIDs})
+
+                floor_list.append({"floorName": floorName, "rooms": room_list})
 
             conn.close()
-            return {"response": "success", "rooms": room_list}
+            return {"response": "success", "floors": floor_list}
+
         else:
             conn.close()
             return {"response": "failure", "error": "Invalid session ID!"}
