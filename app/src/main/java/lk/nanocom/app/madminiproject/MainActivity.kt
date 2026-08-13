@@ -53,12 +53,13 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material3.FabPosition
 import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessaging
 
@@ -235,8 +236,15 @@ fun SmartHomeApp() {
                 floors = SampleData.floors,
                 onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
                 onAddFloorClick = {},
-                onDeleteFloorClick = {}
+                onDeleteFloorClick = {},
+                onStatsClick = { navController.navigate("statistics") },
             )
+        }
+        composable (
+            route = "Statistics",
+            //arguments =
+        ) {
+            StatScreen()
         }
         composable(
             "floors/{floorId}",
@@ -320,20 +328,40 @@ fun FloorListScreen(
     floors: List<Floor>,
     onFloorClick: (String) -> Unit,
     onAddFloorClick: () -> Unit,
+    onStatsClick: () -> Unit,
     onDeleteFloorClick: (String) -> Unit
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text("Floors") }) },
+        floatingActionButtonPosition = FabPosition.Center,
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddFloorClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Floor"
-                )
+                FloatingActionButton(
+                    onClick = onStatsClick,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BarChart,
+                        contentDescription = "Statistics"
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = onAddFloorClick,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = "Add"
+                    )
+                }
             }
         }
     ) { padding ->

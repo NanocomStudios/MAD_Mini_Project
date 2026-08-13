@@ -63,4 +63,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(platform(libs.firebase.bom))
     implementation("com.google.firebase:firebase-analytics")
+    implementation("com.patrykandpatrick.vico:compose:2.0.0-alpha.22")
+    implementation("com.patrykandpatrick.vico:compose-m3:2.0.0-alpha.22")
 }
