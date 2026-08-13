@@ -1,6 +1,7 @@
 package lk.nanocom.app.madminiproject
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -54,15 +55,53 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.ui.Alignment
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material3.Button
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
+import androidx.lifecycle.lifecycleScope
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.Serializable
 
+data class SessionIDRequest(
+    val sessionID: String
+)
+
+data class FirebaseTokenUpdateRequest(
+    val userID: Int,
+    val firebaseToken: String,
+    val sessionID: String
+)
+
+data class STDResponse(
+    val response: String,
+    val error: String?
+)
+
+data class AppActionRequest(
+    val itemID: Int,
+    val action: String,
+    val value: Int,
+    val sessionID: String
+)
 
 class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
@@ -75,14 +114,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            MADMiniProjectTheme {
-                SmartHomeApp()
-            }
-        }
+    fun updateFirebaseToken(){
 
         askNotificationPermission()
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -93,10 +125,112 @@ class MainActivity : ComponentActivity() {
 
             // Get the initial/current FCM registration token
             val token = task.result
+            val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+            sharedPref.edit {
+                putString("firebase_token", token)
+            }
+
             Log.d("FCM", "Device Token: $token")
 
-            // TODO: Send token to your backend server
         }
+
+        val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String? = sharedPref.getString("sessionID", "")
+
+        val req = FirebaseTokenUpdateRequest(
+            userID = sharedPref.getInt("userID", 0),
+            firebaseToken = sharedPref.getString("firebase_token", "") ?: "",
+            sessionID = sharedPref.getString("sessionID", "") ?: ""
+        )
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.apiService.updateFirebaseTokenPostRequest(req)
+                if (response.isSuccessful && response.body()?.response == "success") {
+                    Log.d("FCM", "Firebase token updated successfully")
+                } else {
+                    Log.d("FCM", "Firebase token update failed")
+                }
+            } catch (e: Exception) {
+                Log.d("FCM", "Firebase token update failed")
+            }
+        }
+    }
+
+    fun logoutRequest(){
+        val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+        val req = SessionIDRequest(
+            sessionID = savedSessionID
+        )
+
+        lifecycleScope.launch {
+            try {
+                val response = RetrofitClient.apiService.logoutPostRequest(req)
+                if (response.isSuccessful && response.body()?.response == "success") {
+                    Log.d("API_MESSAGE", "Logout successfully")
+
+                    sharedPref.edit {
+                        remove("sessionID")
+                        remove("userID")
+                    }
+
+
+                } else {
+                    Log.d("API_MESSAGE", "Logout failed")
+                }
+            } catch (e: Exception) {
+                Log.d("API_ERROR", "Network failed")
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        val isSessionValidated = mutableStateOf<Boolean?>(null)
+        val sharedPref = getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String? = sharedPref.getString("sessionID", "")
+
+        if (savedSessionID.isNullOrEmpty()) {
+            isSessionValidated.value = false
+        } else {
+            val req = SessionIDRequest(sessionID = savedSessionID)
+            lifecycleScope.launch {
+                try {
+                    val response = RetrofitClient.apiService.validateSessionPostRequest(req)
+                    if (response.isSuccessful && response.body()?.response == "success") {
+                        isSessionValidated.value = true
+
+                        updateFirebaseToken()
+
+                    } else {
+                        isSessionValidated.value = false
+                    }
+                } catch (e: Exception) {
+                    isSessionValidated.value = false
+                }
+            }
+        }
+
+        setContent {
+            MADMiniProjectTheme {
+                val validated = isSessionValidated.value
+                if (validated == null) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Loading...")
+                    }
+                } else {
+                    SmartHomeApp(
+                        startDestination = if (validated) "floors" else "login",
+                        updateFirebaseToken = ::updateFirebaseToken
+                    )
+                }
+            }
+        }
+
+
     }
 
     private fun askNotificationPermission() {
@@ -110,54 +244,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-object SampleData {
-    val floors = listOf(
-        Floor(
-            id = "floor2",
-            name = "First Floor",
-            rooms = listOf(
-                Room(
-                    id = "room3",
-                    name = "Bedroom",
-                    devices = listOf(
-                        Device.Outlet("d5", "Lamp Outlet", isOn = false, status = DeviceStatus.OFF)
-                    )
-                )
-            )
-        ),
-        Floor(
-            id = "floor1",
-            name = "Ground Floor",
-            rooms = listOf(
-                Room(
-                    id = "room1",
-                    name = "Living Room",
-                    devices = listOf(
-                        Device.Outlet("d1", "TV Outlet", isOn = true, status = DeviceStatus.ON),
-                        Device.MultiSwitch(
-                            "d2", "Wall Gang Box",
-                            switches = mutableListOf(
-                                SwitchNode("s1", true),
-                                SwitchNode("s2", false),
-                                SwitchNode("s3", false)
-                            ),
-                            status = DeviceStatus.ON
-                        ),
-                        Device.Camera("d3", "Living Room Cam", status = DeviceStatus.ON)
-                    )
-                ),
-                Room(
-                    id = "room2",
-                    name = "Kitchen",
-                    devices = listOf(
-                        Device.SafetyDevice("d4", "Iron", isOn = false, maxOnDuration = 1800, status = DeviceStatus.OFF)
-                    )
-                )
-            )
-        )
-    )
-}
+data class RoomsResponse(
+    val response: String,
+    val floors: List<Floor>,
+    val error: String? = null
 
+)
 data class Floor(
     val id: String,
     val name: String,
@@ -175,46 +267,61 @@ data class SwitchNode(
     val isOn: Boolean
 )
 
-sealed class Device {
-    data class Outlet(
-        val id: String,
-        val name: String,
-        var isOn: Boolean,
-        var status: DeviceStatus
-    ) : Device()
-
-    data class MultiSwitch(
-        val id: String,
-        val name: String,
-        val switches: MutableList<SwitchNode>,
-        var status: DeviceStatus
-    ) : Device()
-
-    data class SafetyDevice(
-        val id: String,
-        val name: String,
-        var isOn: Boolean,
-        val maxOnDuration: Int,
-        var status: DeviceStatus
-    ) : Device()
-
-    data class Camera(
-        val id: String,
-        val name: String,
-        var status: DeviceStatus
-    ) : Device()
-}
+data class Device(
+    val id: String,
+    val name: String,
+    val type: String,
+    var isOn: Boolean = false,
+    var status: DeviceStatus = DeviceStatus.OFF,
+    val switches: MutableList<SwitchNode> = mutableListOf(),
+    val maxOnDuration: Int = 0
+)
 
 enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SmartHomeApp() {
+fun SmartHomeApp(
+    startDestination: String = "login",
+    updateFirebaseToken: () -> Unit
+) {
     val navController = rememberNavController()
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val floors = remember { mutableStateOf<List<Floor>>(emptyList()) }
+
+    val loadFloors = {
+        val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+        val savedSessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+        if (savedSessionID.isNotEmpty()) {
+            val req = SessionIDRequest(sessionID = savedSessionID)
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val response = RetrofitClient.apiService.getAppRoomsPostRequest(req)
+                    if (response.isSuccessful) {
+                        if(response.body()?.response == "success"){
+                            withContext(Dispatchers.Main) {
+                                floors.value = response.body()?.floors ?: emptyList()
+                            }
+                        }
+
+                    }
+                } catch (e: Exception) {
+                    Log.d("API_ERROR", "Failed to fetch floors")
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadFloors()
+    }
 
     NavHost(
         navController = navController,
-        startDestination = "login",
+        startDestination = startDestination,
         enterTransition = { EnterTransition.None },
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },
@@ -223,21 +330,73 @@ fun SmartHomeApp() {
         composable("login") {
             LoginScreen(
                 onLoginSuccess = {
+
+
+
                     navController.navigate("floors") {
                         popUpTo("login") {
                             inclusive = true
                         }
                     }
+                    updateFirebaseToken()
+                    loadFloors()
+                },
+                onRegisterClick = {
+                    navController.navigate("register")
+                }
+            )
+        }
+
+        composable("register") {
+            RegisterScreen(
+                onRegisterSuccess = {
+                    navController.popBackStack()
                 }
             )
         }
         composable("floors") {
             FloorListScreen(
-                floors = SampleData.floors,
+                floors = floors.value,
                 onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
                 onAddFloorClick = {},
                 onDeleteFloorClick = {},
                 onStatsClick = { navController.navigate("statistics") },
+                onLogoutClick = {
+
+                    val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                    val savedSessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+                    val req = SessionIDRequest(
+                        sessionID = savedSessionID
+                    )
+
+                    coroutineScope.launch(Dispatchers.IO) {
+                        try {
+                            val response = RetrofitClient.apiService.logoutPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                withContext(Dispatchers.Main) {
+                                    Log.d("API_MESSAGE", "Logout successfully")
+
+                                    sharedPref.edit {
+                                        remove("sessionID")
+                                        remove("userID")
+                                    }
+
+                                    navController.navigate("login") {
+                                        popUpTo("floors") {
+                                            inclusive = true
+                                        }
+                                    }
+                                }
+
+                            } else {
+                                Log.d("API_MESSAGE", "Logout failed")
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Network failed")
+                        }
+                    }
+                }
             )
         }
         composable (
@@ -251,7 +410,7 @@ fun SmartHomeApp() {
             arguments = listOf(navArgument("floorId") { type = NavType.StringType })
         ) { backStackEntry ->
             val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
-            val floor = SampleData.floors.first { it.id == floorId }
+            val floor = floors.value.find { it.id == floorId } ?: return@composable
             RoomListScreen(
                 floor = floor,
                 onRoomClick = { roomId -> navController.navigate("floors/$floorId/rooms/$roomId") },
@@ -269,11 +428,46 @@ fun SmartHomeApp() {
         ) { backStackEntry ->
             val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
-            val room = SampleData.floors.first { it.id == floorId }.rooms.first { it.id == roomId }
+            val floor = floors.value.find { it.id == floorId } ?: return@composable
+            val room = floor.rooms.find { it.id == roomId } ?: return@composable
             DeviceGridScreen(
                 room = room,
                 onBack = { navController.popBackStack() },
-                onToggleDevice = {},
+                onToggleDevice = {deviceID ->
+                    val device = room.devices.find { it.id == deviceID }
+                    device?.let {
+                        when (it.type){
+                            "outlet" -> it.isOn = !it.isOn
+                            "light" -> {
+                                Log.d("APP_MESSAGE", "Light toggled: $deviceID, ${it.isOn}")
+                                val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                                val req = AppActionRequest(
+                                    itemID = it.id.toInt(),
+                                    action = "toggle",
+                                    value = if (it.isOn) 0 else 1,
+                                    sessionID = sharedPref.getString("sessionID", "") ?: ""
+                                )
+                                try {
+                                    coroutineScope.launch {
+                                        val response = RetrofitClient.apiService.actionPostRequest(req)
+                                        if (response.isSuccessful && response.body()?.response == "success") {
+                                            withContext(Dispatchers.Main) {
+                                                it.isOn = !it.isOn
+                                            }
+                                        }
+
+                                    }
+                                }catch (e: Exception){
+                                    Log.d("API_ERROR", "Network failed")
+
+                                }
+
+                            }
+                        }
+                        Log.d("APP_MESSAGE", "Device toggled: $deviceID, ${it.isOn}")
+                    }
+
+                },
                 onAddDeviceClick = {},
                 onDeleteDeviceClick = {},
                 onMultiSwitchClick = { deviceId ->
@@ -294,11 +488,11 @@ fun SmartHomeApp() {
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
             val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
 
-            val floor = SampleData.floors.first { it.id == floorId }
-            val room = floor.rooms.first { it.id == roomId }
-            val device = room.devices.find { deviceIdOf(it) == deviceId } as? Device.MultiSwitch
+            val floor = floors.value.find { it.id == floorId } ?: return@composable
+            val room = floor.rooms.find { it.id == roomId } ?: return@composable
+            val device = room.devices.find { it.id == deviceId }
 
-            if (device != null) {
+            if (device != null && device.type == "MULTISWITCH") {
                 MultiSwitchDetailScreen(
                     multiSwitch = device,
                     onBack = { navController.popBackStack() },
@@ -329,10 +523,22 @@ fun FloorListScreen(
     onFloorClick: (String) -> Unit,
     onAddFloorClick: () -> Unit,
     onStatsClick: () -> Unit,
-    onDeleteFloorClick: (String) -> Unit
+    onDeleteFloorClick: (String) -> Unit,
+    onLogoutClick: () -> Unit
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Floors") }) },
+        topBar = {
+            TopAppBar(title = { Text("Floors") },
+                actions = {
+                    IconButton(onClick = onLogoutClick) {
+                        Icon(
+                            imageVector = Icons.Default.ExitToApp,
+                            contentDescription = "Logout"
+                        )
+                    }
+                }
+            )
+        },
         floatingActionButtonPosition = FabPosition.Center,
         floatingActionButton = {
             Row(
@@ -363,6 +569,7 @@ fun FloorListScreen(
                     )
                 }
             }
+
         }
     ) { padding ->
         LazyColumn(
@@ -443,7 +650,9 @@ fun RoomListScreen(
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(padding).fillMaxSize()
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
         ) {
             items(floor.rooms) { room ->
                 Card(
@@ -490,7 +699,7 @@ fun RoomListScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MultiSwitchDetailScreen(
-    multiSwitch: Device.MultiSwitch,
+    multiSwitch: Device,
     onBack: () -> Unit,
     onSwitchToggle: (String) -> Unit
 ) {
@@ -592,6 +801,43 @@ fun SwitchItem(
     }
 }
 
+@Composable
+fun LightItem(
+    switch: SwitchNode,
+    onToggle: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Light ${switch.id.takeLast(1)}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    text = if (switch.isOn) "ON" else "OFF",
+                    color = if (switch.isOn) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Switch(
+                checked = switch.isOn,
+                onCheckedChange = { onToggle() }
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceGridScreen(
@@ -631,7 +877,9 @@ fun DeviceGridScreen(
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(padding).fillMaxSize()
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
         ) {
             items(room.devices) { device ->
                 val deviceId = deviceIdOf(device)
@@ -640,7 +888,7 @@ fun DeviceGridScreen(
                     onToggle = { onToggleDevice(deviceId) },
                     onDelete = { onDeleteDeviceClick(deviceId) },
                     onMultiSwitchClick = {
-                        if (device is Device.MultiSwitch) {
+                        if (device.type == "MULTISWITCH") {
                             onMultiSwitchClick(deviceId)
                         }
                     }
@@ -650,12 +898,7 @@ fun DeviceGridScreen(
     }
 }
 
-fun deviceIdOf(device: Device): String = when (device) {
-    is Device.Outlet -> device.id
-    is Device.MultiSwitch -> device.id
-    is Device.SafetyDevice -> device.id
-    is Device.Camera -> device.id
-}
+fun deviceIdOf(device: Device): String = device.id
 
 @Composable
 fun DeviceCard(
@@ -668,9 +911,10 @@ fun DeviceCard(
         modifier = Modifier
             .aspectRatio(1f)
             .clickable {
-                when (device) {
-                    is Device.MultiSwitch -> onMultiSwitchClick()
-                    else -> onToggle()
+                if (device.type == "MULTISWITCH") {
+                    onMultiSwitchClick()
+                } else {
+                    onToggle()
                 }
             },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -683,37 +927,38 @@ fun DeviceCard(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                when (device) {
-                    is Device.Outlet -> {
-                        Text(device.name, style = MaterialTheme.typography.titleSmall)
-                        StatusBadge(device.status)
+                Text(device.name, style = MaterialTheme.typography.titleSmall)
+                StatusBadge(device.status)
+
+                when (device.type) {
+                    "outlet" -> {
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
-                    is Device.MultiSwitch -> {
-                        Text(device.name, style = MaterialTheme.typography.titleSmall)
-                        StatusBadge(device.status)
+                    "light" -> {
+                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+                    }
+                    "MULTISWITCH" -> {
                         Text(
                             "${device.switches.count { it.isOn }}/${device.switches.size} on",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    is Device.SafetyDevice -> {
-                        Text(device.name, style = MaterialTheme.typography.titleSmall)
-                        StatusBadge(device.status)
+                    "safety" -> {
                         Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
-                    is Device.Camera -> {
-                        Text(device.name, style = MaterialTheme.typography.titleSmall)
-                        StatusBadge(device.status)
+                    "camera" -> {
                         Icon(Icons.Default.Videocam, contentDescription = null)
+                    }
+                    else ->{
+                        Log.d("DeviceCard", "Unknown device type: ${device.type}")
                     }
                 }
             }
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .align(Alignment.TopEnd)
                     .padding(4.dp)
             ) {
                 Icon(
@@ -743,10 +988,10 @@ fun StatusBadge(status: DeviceStatus) {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun SmartHomeAppPreview() {
-    MADMiniProjectTheme {
-        SmartHomeApp()
-    }
-}
+//@Preview(showBackground = true)
+//@Composable
+//fun SmartHomeAppPreview() {
+//    MADMiniProjectTheme {
+//        SmartHomeApp()
+//    }
+//}

@@ -23,7 +23,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     // Triggered when an incoming message is received
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-
         // Handle notification payload
         remoteMessage.notification?.let {
             showNotification(it.title ?: "No Title", it.body ?: "No Body")
