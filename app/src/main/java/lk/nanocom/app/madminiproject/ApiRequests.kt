@@ -19,4 +19,10 @@ interface ApiService {
 
     @POST("user/logout")
     suspend fun logoutPostRequest(@Body request: SessionIDRequest): Response<STDResponse>
+
+    @POST("app/getRooms")
+    suspend fun getAppRoomsPostRequest(@Body request: SessionIDRequest): Response<RoomsResponse>
+
+    @POST("app/action")
+    suspend fun actionPostRequest(@Body request: AppActionRequest): Response<STDResponse>
 }

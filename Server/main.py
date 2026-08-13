@@ -668,10 +668,13 @@ def appGetRooms(session: Session):
                         c.execute("SELECT * FROM items WHERE itemID=?", (item[0],))
                         item_data = c.fetchone()
                         if item_data:
-                            itemIDs.append({"itemID": item_data[0], "itemName": item_data[1], "type": item_data[2], "state": item_data[3]})
-                    room_list.append({"roomName": roomName, "itemIDs": itemIDs})
+                            status = "OFF" if (item_data[3] == '0') else "ON"
+                            isOn = True if item_data[3] == '1' else False
 
-                floor_list.append({"floorName": floorName, "rooms": room_list})
+                            itemIDs.append({"id": item_data[0], "name": item_data[1], "type": item_data[2], "status": status, "isOn": isOn})
+                    room_list.append({"id": roomID, "name": roomName, "devices": itemIDs})
+
+                floor_list.append({"id": floorID, "name": floorName, "rooms": room_list})
 
             conn.close()
             return {"response": "success", "floors": floor_list}
