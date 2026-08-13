@@ -93,8 +93,6 @@ data class STDResponse(
     val error: String?
 )
 
-
-
 class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -215,7 +213,7 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     SmartHomeApp(
-                        startDestination = if (validated) "rooms" else "login",
+                        startDestination = if (validated) "floors" else "login",
                         updateFirebaseToken = ::updateFirebaseToken
                     )
                 }
@@ -236,58 +234,49 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-
-//@Serializable
-//data class RoomStructureResponse(
-//    val response: String,
-//    val rooms: List<Room>
-//)
-//
-//@Serializable
-//data class Room(
-//    val roomName: String,
-//    val itemIDs: List<Item>
-//)
-//
-//@Serializable
-//data class Item(
-//    val itemID: Int,
-//    val itemName: String,
-//    val type: String,
-//    val state: String // Kept as String because "1" and "0" are quoted in JSON
-//)
-
 object SampleData {
-    val rooms = listOf(
-        Room(
-            id = "room3",
-            name = "Bedroom",
-            devices = listOf(
-                Device.Outlet("d5", "Lamp Outlet", isOn = false, status = DeviceStatus.OFF)
+    val floors = listOf(
+        Floor(
+            id = "floor2",
+            name = "First Floor",
+            rooms = listOf(
+                Room(
+                    id = "room3",
+                    name = "Bedroom",
+                    devices = listOf(
+                        Device.Outlet("d5", "Lamp Outlet", isOn = false, status = DeviceStatus.OFF)
+                    )
+                )
             )
         ),
-        Room(
-            id = "room1",
-            name = "Living Room",
-            devices = listOf(
-                Device.Outlet("d1", "TV Outlet", isOn = true, status = DeviceStatus.ON),
-                Device.MultiSwitch(
-                    "d2", "Wall Gang Box",
-                    switches = mutableListOf(
-                        SwitchNode("s1", true),
-                        SwitchNode("s2", false),
-                        SwitchNode("s3", false)
-                    ),
-                    status = DeviceStatus.ON
+        Floor(
+            id = "floor1",
+            name = "Ground Floor",
+            rooms = listOf(
+                Room(
+                    id = "room1",
+                    name = "Living Room",
+                    devices = listOf(
+                        Device.Outlet("d1", "TV Outlet", isOn = true, status = DeviceStatus.ON),
+                        Device.MultiSwitch(
+                            "d2", "Wall Gang Box",
+                            switches = mutableListOf(
+                                SwitchNode("s1", true),
+                                SwitchNode("s2", false),
+                                SwitchNode("s3", false)
+                            ),
+                            status = DeviceStatus.ON
+                        ),
+                        Device.Camera("d3", "Living Room Cam", status = DeviceStatus.ON)
+                    )
                 ),
-                Device.Camera("d3", "Living Room Cam", status = DeviceStatus.ON)
-            )
-        ),
-        Room(
-            id = "room2",
-            name = "Kitchen",
-            devices = listOf(
-                Device.SafetyDevice("d4", "Iron", isOn = false, maxOnDuration = 1800, status = DeviceStatus.OFF)
+                Room(
+                    id = "room2",
+                    name = "Kitchen",
+                    devices = listOf(
+                        Device.SafetyDevice("d4", "Iron", isOn = false, maxOnDuration = 1800, status = DeviceStatus.OFF)
+                    )
+                )
             )
         )
     )
@@ -352,8 +341,6 @@ fun SmartHomeApp(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
-
-
     NavHost(
         navController = navController,
         startDestination = startDestination,
@@ -365,7 +352,7 @@ fun SmartHomeApp(
         composable("login") {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate("rooms") {
+                    navController.navigate("floors") {
                         popUpTo("login") {
                             inclusive = true
                         }
@@ -385,60 +372,12 @@ fun SmartHomeApp(
                 }
             )
         }
-//        composable("floors") {
-//            FloorListScreen(
-//                floors = SampleData.floors,
-//                onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
-//                onAddFloorClick = {},
-//                onDeleteFloorClick = {},
-//                onLogoutClick = {
-//
-//
-//                    val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
-//                    val savedSessionID: String = sharedPref.getString("sessionID", "") ?: ""
-//
-//                    val req = SessionIDRequest(
-//                        sessionID = savedSessionID
-//                    )
-//
-//                    coroutineScope.launch(Dispatchers.IO) {
-//                        try {
-//                            val response = RetrofitClient.apiService.logoutPostRequest(req)
-//                            if (response.isSuccessful && response.body()?.response == "success") {
-//                                withContext(Dispatchers.Main) {
-//                                    Log.d("API_MESSAGE", "Logout successfully")
-//
-//                                    sharedPref.edit {
-//                                        remove("sessionID")
-//                                        remove("userID")
-//                                    }
-//
-//                                    navController.navigate("login") {
-//                                        popUpTo("floors") {
-//                                            inclusive = true
-//                                        }
-//                                    }
-//                                }
-//
-//                            } else {
-//                                Log.d("API_MESSAGE", "Logout failed")
-//                            }
-//                        } catch (e: Exception) {
-//                            Log.d("API_ERROR", "Network failed")
-//                        }
-//                    }
-//
-//                }
-//            )
-//        }
-        composable(
-            "rooms"
-        ) {
-            RoomListScreen(
-                rooms = SampleData.rooms,
-                onRoomClick = { roomId -> navController.navigate("rooms/$roomId") },
-                onAddRoomClick = {},
-                onDeleteRoomClick = {},
+        composable("floors") {
+            FloorListScreen(
+                floors = SampleData.floors,
+                onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
+                onAddFloorClick = {},
+                onDeleteFloorClick = {},
                 onLogoutClick = {
 
                     val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
@@ -474,18 +413,33 @@ fun SmartHomeApp(
                             Log.d("API_ERROR", "Network failed")
                         }
                     }
-
                 }
             )
         }
         composable(
-            "rooms/{roomId}",
+            "floors/{floorId}",
+            arguments = listOf(navArgument("floorId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
+            val floor = SampleData.floors.first { it.id == floorId }
+            RoomListScreen(
+                floor = floor,
+                onRoomClick = { roomId -> navController.navigate("floors/$floorId/rooms/$roomId") },
+                onBack = { navController.popBackStack() },
+                onAddRoomClick = {},
+                onDeleteRoomClick = {}
+            )
+        }
+        composable(
+            "floors/{floorId}/rooms/{roomId}",
             arguments = listOf(
+                navArgument("floorId") { type = NavType.StringType },
                 navArgument("roomId") { type = NavType.StringType }
             )
         ) { backStackEntry ->
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
-            val room = SampleData.rooms.first { it.id == roomId }
+            val room = SampleData.floors.first { it.id == floorId }.rooms.first { it.id == roomId }
             DeviceGridScreen(
                 room = room,
                 onBack = { navController.popBackStack() },
@@ -493,23 +447,25 @@ fun SmartHomeApp(
                 onAddDeviceClick = {},
                 onDeleteDeviceClick = {},
                 onMultiSwitchClick = { deviceId ->
-                    navController.navigate("rooms/$roomId/multiswitch/$deviceId")
+                    navController.navigate("floors/$floorId/rooms/$roomId/multiswitch/$deviceId")
                 }
             )
         }
 
         composable(
-            "rooms/{roomId}/multiswitch/{deviceId}",
+            "floors/{floorId}/rooms/{roomId}/multiswitch/{deviceId}",
             arguments = listOf(
+                navArgument("floorId") { type = NavType.StringType },
                 navArgument("roomId") { type = NavType.StringType },
                 navArgument("deviceId") { type = NavType.StringType }
             )
         ) { backStackEntry ->
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
             val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
 
-//            val floor = SampleData.floors.first { it.id == floorId }
-            val room = SampleData.rooms.first { it.id == roomId }
+            val floor = SampleData.floors.first { it.id == floorId }
+            val room = floor.rooms.first { it.id == roomId }
             val device = room.devices.find { deviceIdOf(it) == deviceId } as? Device.MultiSwitch
 
             if (device != null) {
@@ -536,100 +492,98 @@ fun SmartHomeApp(
     }
 }
 
-//@OptIn(ExperimentalMaterial3Api::class)
-//@Composable
-//fun FloorListScreen(
-//    floors: List<Floor>,
-//    onFloorClick: (String) -> Unit,
-//    onAddFloorClick: () -> Unit,
-//    onDeleteFloorClick: (String) -> Unit,
-//    onLogoutClick: () -> Unit
-//) {
-//    Scaffold(
-//        topBar = {
-//            TopAppBar(title = { Text("Floors") },
-//            actions = {
-//                IconButton(onClick = onLogoutClick) {
-//                    Icon(
-//                        imageVector = Icons.Default.ExitToApp,
-//                        contentDescription = "Logout"
-//                    )
-//                }
-//            }
-//        )
-//                 },
-//        floatingActionButton = {
-//            FloatingActionButton(
-//                onClick = onAddFloorClick,
-//                containerColor = MaterialTheme.colorScheme.primary,
-//                contentColor = MaterialTheme.colorScheme.onPrimary
-//            ) {
-//                Icon(
-//                    imageVector = Icons.Default.Add,
-//                    contentDescription = "Add Floor"
-//                )
-//            }
-//
-//        }
-//    ) { padding ->
-//        LazyColumn(
-//            contentPadding = PaddingValues(16.dp),
-//            verticalArrangement = Arrangement.spacedBy(12.dp),
-//            modifier = Modifier
-//                .padding(padding)
-//                .fillMaxSize()
-//        ) {
-//            items(floors) { floor ->
-//                Card(
-//                    modifier = Modifier
-//                        .fillMaxWidth()
-//                        .height(70.dp)
-//                        .clickable { onFloorClick(floor.id) },
-//                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-//                ) {
-//                    Box(modifier = Modifier.fillMaxSize()) {
-//                        Text(
-//                            text = floor.name,
-//                            style = MaterialTheme.typography.titleMedium,
-//                            modifier = Modifier.align(Alignment.Center)
-//                        )
-//                        IconButton(
-//                            onClick = { onDeleteFloorClick(floor.id) },
-//                            modifier = Modifier
-//                                .align(Alignment.CenterEnd)
-//                                .padding(4.dp)
-//                        ) {
-//                            Icon(
-//                                imageVector = Icons.Default.Close,
-//                                contentDescription = "Delete Floor",
-//                                tint = MaterialTheme.colorScheme.error
-//                            )
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//    }
-//}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RoomListScreen(
-    rooms : List<Room>,
-    onRoomClick: (String) -> Unit,
-    onAddRoomClick: () -> Unit,
-    onDeleteRoomClick: (String) -> Unit,
+fun FloorListScreen(
+    floors: List<Floor>,
+    onFloorClick: (String) -> Unit,
+    onAddFloorClick: () -> Unit,
+    onDeleteFloorClick: (String) -> Unit,
     onLogoutClick: () -> Unit
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Rooms") },
+            TopAppBar(title = { Text("Floors") },
                 actions = {
                     IconButton(onClick = onLogoutClick) {
                         Icon(
                             imageVector = Icons.Default.ExitToApp,
                             contentDescription = "Logout"
                         )
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onAddFloorClick,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Floor"
+                )
+            }
+
+        }
+    ) { padding ->
+        LazyColumn(
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+        ) {
+            items(floors) { floor ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(70.dp)
+                        .clickable { onFloorClick(floor.id) },
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Text(
+                            text = floor.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                        IconButton(
+                            onClick = { onDeleteFloorClick(floor.id) },
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Delete Floor",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RoomListScreen(
+    floor: Floor,
+    onRoomClick: (String) -> Unit,
+    onBack: () -> Unit,
+    onAddRoomClick: () -> Unit,
+    onDeleteRoomClick: (String) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(floor.name) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -652,11 +606,9 @@ fun RoomListScreen(
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
+            modifier = Modifier.padding(padding).fillMaxSize()
         ) {
-            items(rooms) { room ->
+            items(floor.rooms) { room ->
                 Card(
                     modifier = Modifier
                         .aspectRatio(1f)
@@ -842,9 +794,7 @@ fun DeviceGridScreen(
             contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
+            modifier = Modifier.padding(padding).fillMaxSize()
         ) {
             items(room.devices) { device ->
                 val deviceId = deviceIdOf(device)
