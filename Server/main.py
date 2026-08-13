@@ -314,11 +314,19 @@ def itemAction(action: ItemAction):
             userID = room[2]
             c.execute("SELECT * FROM sessions WHERE userID=?", (userID,))
             sessions = c.fetchall()
+
+            push_notification_data = {
+                "itemID": str(action.itemID),
+                "action": action.action,
+                "value": str(action.value),
+            }
+
             for session in sessions:
                 sessionID = session[0]
                 message = messaging.Message(
-                    notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
-                    token=session[3], # Target specific device
+                    # notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
+                    data=push_notification_data,
+                    token=session[3] # Target specific device
                 )
                 try:
                     response = messaging.send(message)
@@ -374,11 +382,19 @@ def appAction(action: AppAction):
                 userID = room[2]
                 c.execute("SELECT * FROM sessions WHERE userID=?", (userID,))
                 sessions = c.fetchall()
+
+                push_notification_data = {
+                    "itemID": str(action.itemID),
+                    "action": action.action,
+                    "value": str(action.value)
+                }
+
                 for session in sessions:
                     sessionID = session[0]
                     message = messaging.Message(
-                        notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
-                        token=session[3], # Target specific device
+                        # notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
+                        data=push_notification_data,
+                        token=session[3] # Target specific device
                     )
                     try:
                         response = messaging.send(message)

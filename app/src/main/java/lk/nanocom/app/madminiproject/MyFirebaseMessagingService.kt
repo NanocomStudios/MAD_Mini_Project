@@ -20,12 +20,27 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // TODO: Send this token to your backend server if needed
     }
 
+    private val TAG = "FCM_DATA"
+
     // Triggered when an incoming message is received
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         // Handle notification payload
-        remoteMessage.notification?.let {
-            showNotification(it.title ?: "No Title", it.body ?: "No Body")
+//        remoteMessage.notification?.let {
+//            showNotification(it.title ?: "No Title", it.body ?: "No Body")
+//
+//        }
+        Log.d("FCM_STATUS", "Message Received")
+        if (remoteMessage.data.isNotEmpty()) {
+            Log.d(TAG, "Data Payload Size: ${remoteMessage.data.size}")
+
+            // 2. Loop through and log each key-value pair
+            for ((key, value) in remoteMessage.data) {
+                Log.d(TAG, "Key: $key -> Value: $value")
+            }
+
+            // Alternative: Print the entire raw map at once
+            Log.d(TAG, "Raw Payload Map: ${remoteMessage.data}")
         }
     }
 
