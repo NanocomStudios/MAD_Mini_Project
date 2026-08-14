@@ -491,6 +491,16 @@ fun SmartHomeApp(
         ) {
             StatScreen()
         }
+
+        composable(
+            route = "floors/{floorId}/rooms/{roomId}/camera/{deviceId}"
+        ){ backStackEntry ->
+            val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
+//            RtspPlayerScreen(it.arguments?.getString("streamURL") ?: "")
+            //rtsp://132.239.12.145/axis-media/media.amp
+            RtspPlayerScreen("rtsp://132.239.12.145/axis-media/media.amp")
+        }
+
         composable(
             "floors/{floorId}",
             arguments = listOf(navArgument("floorId") { type = NavType.StringType })
@@ -586,6 +596,9 @@ fun SmartHomeApp(
                 },
                 onMultiSwitchClick = { deviceId ->
                     navController.navigate("floors/$floorId/rooms/$roomId/multiswitch/$deviceId")
+                },
+                onCameraSwitchClick = { deviceID ->
+                    navController.navigate("floors/$floorId/rooms/$roomId/camera/$deviceID")
                 }
             )
         }
@@ -1193,7 +1206,8 @@ fun DeviceGridScreen(
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onToggleDevice: (String) -> Unit,
-    onMultiSwitchClick: (String) -> Unit
+    onMultiSwitchClick: (String) -> Unit,
+    onCameraSwitchClick: (String) -> Unit
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -1381,17 +1395,37 @@ fun DeviceGridScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    showAddDialog = true
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Device"
-                )
+                FloatingActionButton(
+                    onClick = {
+                        showAddDialog = true
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Device"
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        onCameraSwitchClick("1")
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BarChart,
+                        contentDescription = "Statistics"
+                    )
+                }
             }
         }
     ) { padding ->
