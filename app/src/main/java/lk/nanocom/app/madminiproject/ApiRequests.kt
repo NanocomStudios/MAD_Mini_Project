@@ -43,4 +43,7 @@ interface ApiService {
 
     @POST("app/removeItemFromRoom")
     suspend fun removeItemFromRoomPostRequest(@Body request: DeviceRequest): Response<STDResponse>
+
+    @POST("app/getItemInfo")
+    suspend fun getItemInfoPostRequest(@Body request: ItemInfoRequest): Response<ItemInfoResponse>
 }

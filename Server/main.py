@@ -177,6 +177,11 @@ class RoomItem(BaseModel):
     floorName: str
     roomName: str
     itemID: int
+    itemName: str
+    sessionID: str
+
+class AppItem(BaseModel):
+    itemID: int
     sessionID: str
 
 class ItemAction(BaseModel):
@@ -593,6 +598,9 @@ def appAddItemToRoom(roomItem: RoomItem):
                 conn.close()
                 return {"response": "failure", "error": "Item not found!"}
 
+            if(roomItem.itemName != ""):
+                c.execute("UPDATE items SET itemName=? WHERE itemID=?",  (roomItem.itemName, roomItem.itemID))
+
             c.execute("SELECT * FROM room_items WHERE itemID=?", (roomItem.itemID,))
             item = c.fetchone()
             if item:
@@ -669,6 +677,37 @@ def appRemoveItemFromRoom(roomItem: RoomItem):
         conn.close()
         return {"response": "failure", "error": "Error: removing item from the room!"}
 
+
+@app.post("/app/getItemInfo")
+def appGetItemInfo(appItem: AppItem):
+    is_valid = isSessionValid(appItem.sessionID)
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        if(is_valid):
+
+            c.execute("SELECT * FROM items WHERE itemID=?", (appItem.itemID,))
+            item = c.fetchone()
+            if not item:
+                conn.close()
+                return {"response": "failure", "error": "Item not found!"}
+
+            conn.close()
+
+            return {
+                "response": "success",
+                "itemID": item[0],
+                "itemName": item[1],
+                "type": item[2],
+                "state": item[3],
+                "lastOnTime": item[4],
+                "cuttoffTime": item[5]
+            }
+
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: removing item from the room!"}  
 
 @app.post("/app/getRooms")
 def appGetRooms(session: Session):

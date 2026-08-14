@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -137,10 +138,28 @@ data class RoomRequest(
     val sessionID: String
 )
 
+data class ItemInfoRequest(
+    val itemID: Int,
+    val sessionID: String
+)
+
+data class ItemInfoResponse(
+    val response: String,
+    val itemID: Int,
+    val itemName: String,
+    val type: String,
+    val state: String,
+    val lastOnTime: String,
+    val cuttofftime: String,
+    val error: String? = null
+
+)
+
 data class DeviceRequest(
     val floorName: String,
     val roomName: String,
     val itemID: Int,
+    val itemName: String = "",
     val sessionID: String
 )
 
@@ -816,9 +835,9 @@ fun FloorListScreen(
                                 .padding(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete Floor",
-                                tint = MaterialTheme.colorScheme.error
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Delete Device",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -1012,9 +1031,9 @@ fun RoomListScreen(
                                 .padding(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete Room",
-                                tint = MaterialTheme.colorScheme.error
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Delete Device",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -1188,7 +1207,12 @@ fun DeviceGridScreen(
     val context = LocalContext.current
 
     if (showAddDialog) {
-        var textInput by remember { mutableStateOf("") }
+        var textInput_ID by remember { mutableStateOf("") }
+        var textInput_Name by remember { mutableStateOf("") }
+
+        var itemType by remember { mutableStateOf("") }
+
+        var itemNameBoxVisibility by remember { mutableStateOf(false) }
 
         AlertDialog(
             onDismissRequest = { showAddDialog = false },
@@ -1198,14 +1222,69 @@ fun DeviceGridScreen(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Item ID:")
+                    Text("Item Code:")
                     OutlinedTextField(
-                        value = textInput,
-                        onValueChange = { textInput = it },
-                        label = { Text("Item ID") },
+                        value = textInput_ID,
+                        onValueChange = { textInput_ID = it },
+                        label = { Text("Code") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Button(onClick={
+                        errorMessage = ""
+                        itemNameBoxVisibility = false
+                        textInput_Name = ""
+                        itemType = ""
+
+                        if(textInput_ID.isEmpty()) return@Button
+
+                        val req = ItemInfoRequest(
+                            itemID = textInput_ID.toIntOrNull() ?: -1,
+                            sessionID = saved_sessionID
+                        )
+
+                        coroutineScope.launch {
+                            try {
+                                val response =
+                                    RetrofitClient.apiService.getItemInfoPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+
+                                    textInput_Name = response.body()?.itemName ?: ""
+                                    itemType = response.body()?.type ?: ""
+                                    errorMessage = ""
+                                    itemNameBoxVisibility = true
+
+                                } else {
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                    textInput_Name = ""
+                                    itemType = ""
+                                    itemNameBoxVisibility = false
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new room")
+                                errorMessage = "Failed to add new item"
+                                textInput_Name = ""
+                                textInput_ID = ""
+                                itemNameBoxVisibility = false
+                            }
+                        }
+
+
+                    }) {
+                        Text("Search")
+                    }
+                    if(itemNameBoxVisibility) {
+                        Text(
+                            "Item Type: $itemType"
+                        )
+                        OutlinedTextField(
+                            value = textInput_Name,
+                            onValueChange = { textInput_Name = it },
+                            label = { Text("Item Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                     Text(
                         errorMessage,
                         color = MaterialTheme.colorScheme.error,
@@ -1214,32 +1293,36 @@ fun DeviceGridScreen(
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if(textInput.isEmpty()) return@Button
-                        val req = DeviceRequest(
-                            floorName = floor.name,
-                            roomName = room.name,
-                            itemID = textInput.toIntOrNull() ?: -1,
-                            sessionID = saved_sessionID
-                        )
-                        coroutineScope.launch {
-                            try {
-                                val response = RetrofitClient.apiService.addItemToRoomPostRequest(req)
-                                if (response.isSuccessful && response.body()?.response == "success") {
-                                    onRefresh()
-                                    showAddDialog = false
-                                }else{
-                                    errorMessage = response.body()?.error ?: "Unknown error"
+                if(itemNameBoxVisibility) {
+                    Button(
+                        onClick = {
+                            if (textInput_ID.isEmpty()) return@Button
+                            val req = DeviceRequest(
+                                floorName = floor.name,
+                                roomName = room.name,
+                                itemID = textInput_ID.toIntOrNull() ?: -1,
+                                itemName = textInput_Name,
+                                sessionID = saved_sessionID
+                            )
+                            coroutineScope.launch {
+                                try {
+                                    val response =
+                                        RetrofitClient.apiService.addItemToRoomPostRequest(req)
+                                    if (response.isSuccessful && response.body()?.response == "success") {
+                                        onRefresh()
+                                        showAddDialog = false
+                                    } else {
+                                        errorMessage = response.body()?.error ?: "Unknown error"
+                                    }
+                                } catch (e: Exception) {
+                                    Log.d("API_ERROR", "Failed to add new room")
+                                    errorMessage = "Failed to add new item"
                                 }
-                            } catch (e: Exception) {
-                                Log.d("API_ERROR", "Failed to add new room")
-                                errorMessage = "Failed to add new item"
                             }
                         }
+                    ) {
+                        Text("Submit")
                     }
-                ) {
-                    Text("Submit")
                 }
             },
             dismissButton = {
@@ -1285,6 +1368,7 @@ fun DeviceGridScreen(
             }
         )
     }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1403,9 +1487,9 @@ fun DeviceCard(
                     .padding(4.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
+                    imageVector = Icons.Default.MoreVert,
                     contentDescription = "Delete Device",
-                    tint = MaterialTheme.colorScheme.error
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
         }
