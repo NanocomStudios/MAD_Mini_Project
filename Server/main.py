@@ -311,20 +311,25 @@ def itemAction(action: ItemAction):
             roomID = row[0]
             c.execute("SELECT * FROM rooms WHERE roomID=?", (roomID,))
             room = c.fetchone()
-            userID = room[2]
+            floorID = room[2]
+            c.execute("SELECT * FROM floors WHERE floorID=?", (floorID,))
+            floor = c.fetchone()
+            userID = floor[2]
+            c.execute("SELECT * FROM sessions WHERE userID=?", (userID,))
             c.execute("SELECT * FROM sessions WHERE userID=?", (userID,))
             sessions = c.fetchall()
 
             push_notification_data = {
+                "type": "action",
                 "itemID": str(action.itemID),
                 "action": action.action,
-                "value": str(action.value),
+                "value": str(action.value)
             }
 
             for session in sessions:
                 sessionID = session[0]
                 message = messaging.Message(
-                    # notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
+                    notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
                     data=push_notification_data,
                     token=session[3] # Target specific device
                 )
@@ -379,11 +384,15 @@ def appAction(action: AppAction):
                 roomID = row[0]
                 c.execute("SELECT * FROM rooms WHERE roomID=?", (roomID,))
                 room = c.fetchone()
-                userID = room[2]
+                floorID = room[2]
+                c.execute("SELECT * FROM floors WHERE floorID=?", (floorID,))
+                floor = c.fetchone()
+                userID = floor[2]
                 c.execute("SELECT * FROM sessions WHERE userID=?", (userID,))
                 sessions = c.fetchall()
 
                 push_notification_data = {
+                    "type": "action",
                     "itemID": str(action.itemID),
                     "action": action.action,
                     "value": str(action.value)
@@ -392,7 +401,7 @@ def appAction(action: AppAction):
                 for session in sessions:
                     sessionID = session[0]
                     message = messaging.Message(
-                        # notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
+                        notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
                         data=push_notification_data,
                         token=session[3] # Target specific device
                     )
@@ -429,6 +438,12 @@ def appNewFloor(floor: AppFloor):
             c.execute("SELECT * FROM sessions WHERE sessionID=?", (floor.sessionID,))
             session = c.fetchone()
             userID = session[1]
+
+            c.execute("SELECT * FROM floors WHERE floorName=? AND userID=?", (floor.floorName, userID))
+            existing_floor = c.fetchone()
+            if existing_floor:
+                conn.close()
+                return {"response": "failure", "error": "Floor already exists!"}
 
             c.execute("INSERT INTO floors (floorName, userID) VALUES (?, ?)", (floor.floorName, userID))
             conn.commit()
@@ -499,6 +514,12 @@ def appNewRoom(room: AppRoom):
                 return {"response": "failure", "error": "Floor not found!"}
 
             floorID = floor[0]
+
+            c.execute("SELECT * FROM rooms WHERE roomName=? AND floorID=?", (room.roomName, floorID))
+            existing_room = c.fetchone()
+            if existing_room:
+                conn.close()
+                return {"response": "failure", "error": "Room already exists!"}
 
             c.execute("INSERT INTO rooms (roomName, floorID) VALUES (?, ?)", (room.roomName, floorID))
             conn.commit()

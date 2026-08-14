@@ -26,21 +26,23 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         // Handle notification payload
-//        remoteMessage.notification?.let {
-//            showNotification(it.title ?: "No Title", it.body ?: "No Body")
-//
-//        }
-        Log.d("FCM_STATUS", "Message Received")
-        if (remoteMessage.data.isNotEmpty()) {
-            Log.d(TAG, "Data Payload Size: ${remoteMessage.data.size}")
-
-            // 2. Loop through and log each key-value pair
-            for ((key, value) in remoteMessage.data) {
-                Log.d(TAG, "Key: $key -> Value: $value")
+        remoteMessage.notification?.let {
+            if(isAppInBackground()) {
+                showNotification(it.title ?: "No Title", it.body ?: "No Body")
             }
 
-            // Alternative: Print the entire raw map at once
-            Log.d(TAG, "Raw Payload Map: ${remoteMessage.data}")
+        }
+        Log.d("FCM_STATUS", "Message Received")
+        if (remoteMessage.data.isNotEmpty()) {
+            Log.d(TAG, "Data Payload: ${remoteMessage.data}")
+
+            val deviceId = remoteMessage.data["itemID"]
+            val value = remoteMessage.data["value"]
+
+            if (deviceId != null && value != null) {
+                val isOn = value == "1" || value.lowercase() == "true" || value.lowercase() == "on"
+                FCMEventManager.emitEvent(DeviceToggleEvent(deviceId, isOn))
+            }
         }
     }
 

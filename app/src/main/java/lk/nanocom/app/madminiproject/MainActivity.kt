@@ -62,12 +62,17 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -77,9 +82,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
+
+data class DeviceToggleEvent(
+    val deviceId: String,
+    val isOn: Boolean
+)
+
+object FCMEventManager {
+    private val _deviceEvents = MutableSharedFlow<DeviceToggleEvent>(extraBufferCapacity = 10)
+    val deviceEvents = _deviceEvents.asSharedFlow()
+
+    fun emitEvent(event: DeviceToggleEvent) {
+        _deviceEvents.tryEmit(event)
+    }
+}
 
 data class SessionIDRequest(
     val sessionID: String
@@ -102,6 +125,30 @@ data class AppActionRequest(
     val value: Int,
     val sessionID: String
 )
+
+data class FloorRequest(
+    val floorName: String,
+    val sessionID: String
+)
+
+data class RoomRequest(
+    val floorName: String,
+    val roomName: String,
+    val sessionID: String
+)
+
+data class DeviceRequest(
+    val floorName: String,
+    val roomName: String,
+    val itemID: Int,
+    val sessionID: String
+)
+
+
+fun isAppInBackground(): Boolean {
+    val currentState = ProcessLifecycleOwner.get().lifecycle.currentState
+    return !currentState.isAtLeast(Lifecycle.State.STARTED)
+}
 
 class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
@@ -317,6 +364,22 @@ fun SmartHomeApp(
 
     LaunchedEffect(Unit) {
         loadFloors()
+
+        FCMEventManager.deviceEvents.collect { event ->
+            Log.d("FCM_EVENT", "Updating UI for device ${event.deviceId} to ${event.isOn}")
+            floors.value = floors.value.map { floor ->
+                floor.copy(rooms = floor.rooms.map { room ->
+                    room.copy(devices = room.devices.map { device ->
+                        if (device.id == event.deviceId) {
+                            device.copy(
+                                isOn = event.isOn,
+                                status = if (event.isOn) DeviceStatus.ON else DeviceStatus.OFF
+                            )
+                        } else device
+                    })
+                })
+            }
+        }
     }
 
     NavHost(
@@ -358,8 +421,7 @@ fun SmartHomeApp(
             FloorListScreen(
                 floors = floors.value,
                 onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
-                onAddFloorClick = {},
-                onDeleteFloorClick = {},
+                onRefresh = loadFloors,
                 onStatsClick = { navController.navigate("statistics") },
                 onLogoutClick = {
 
@@ -399,6 +461,12 @@ fun SmartHomeApp(
                 }
             )
         }
+        composable(
+            "floors/new",
+        ) {
+            AddNewFloorPopup()
+        }
+
         composable (
             route = "statistics",
         ) {
@@ -414,8 +482,7 @@ fun SmartHomeApp(
                 floor = floor,
                 onRoomClick = { roomId -> navController.navigate("floors/$floorId/rooms/$roomId") },
                 onBack = { navController.popBackStack() },
-                onAddRoomClick = {},
-                onDeleteRoomClick = {}
+                onRefresh = loadFloors
             )
         }
         composable(
@@ -430,8 +497,10 @@ fun SmartHomeApp(
             val floor = floors.value.find { it.id == floorId } ?: return@composable
             val room = floor.rooms.find { it.id == roomId } ?: return@composable
             DeviceGridScreen(
+                floor = floor,
                 room = room,
                 onBack = { navController.popBackStack() },
+                onRefresh = { loadFloors() },
                 onToggleDevice = { deviceID ->
                     Log.d("APP_DEBUG", "onToggleDevice called for ID: $deviceID")
                     val device = room.devices.find { it.id == deviceID }
@@ -496,8 +565,6 @@ fun SmartHomeApp(
                         }
                     } ?: Log.e("APP_DEBUG", "Device $deviceID not found in room $roomId")
                 },
-                onAddDeviceClick = {},
-                onDeleteDeviceClick = {},
                 onMultiSwitchClick = { deviceId ->
                     navController.navigate("floors/$floorId/rooms/$roomId/multiswitch/$deviceId")
                 }
@@ -560,11 +627,116 @@ fun SmartHomeApp(
 fun FloorListScreen(
     floors: List<Floor>,
     onFloorClick: (String) -> Unit,
-    onAddFloorClick: () -> Unit,
+    onRefresh: () -> Unit,
     onStatsClick: () -> Unit,
-    onDeleteFloorClick: (String) -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedFloor by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var textInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Floor") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Floor Name:")
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Floor") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                        )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if(textInput.isEmpty()) return@Button
+                        val req = FloorRequest(
+                            floorName = textInput,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.newFloorPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                    showAddDialog = false
+                                }else{
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new floor")
+                                errorMessage = "Failed to add new floor"
+                            }
+                        }
+
+                    }
+                ) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = FloorRequest(
+                        floorName = selectedFloor,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.deleteFloorPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to delete floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Floors") },
@@ -598,7 +770,9 @@ fun FloorListScreen(
                 }
 
                 FloatingActionButton(
-                    onClick = onAddFloorClick,
+                    onClick = {
+                        showAddDialog = true
+                    },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
@@ -633,7 +807,10 @@ fun FloorListScreen(
                             modifier = Modifier.align(Alignment.Center)
                         )
                         IconButton(
-                            onClick = { onDeleteFloorClick(floor.id) },
+                            onClick = {
+                                selectedFloor = floor.name
+                                showDeleteDialog = true
+                            },
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(4.dp)
@@ -657,9 +834,116 @@ fun RoomListScreen(
     floor: Floor,
     onRoomClick: (String) -> Unit,
     onBack: () -> Unit,
-    onAddRoomClick: () -> Unit,
-    onDeleteRoomClick: (String) -> Unit
+    onRefresh: () -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedRoom by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("")}
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var textInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Room") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Room Name:")
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Room") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if(textInput.isEmpty()) return@Button
+                        val req = RoomRequest(
+                            floorName = floor.name,
+                            roomName = textInput,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.newRoomPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                    showAddDialog = false
+                                }else{
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new room")
+                                errorMessage = "Failed to add new room"
+                            }
+                        }
+                    }
+                ) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = RoomRequest(
+                        floorName = floor.name,
+                        roomName = selectedRoom,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.deleteRoomPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to add new floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -673,7 +957,9 @@ fun RoomListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onAddRoomClick,
+                onClick = {
+                    showAddDialog = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
@@ -717,7 +1003,10 @@ fun RoomListScreen(
                             )
                         }
                         IconButton(
-                            onClick = { onDeleteRoomClick(room.id) },
+                            onClick = {
+                                selectedRoom = room.name
+                                showDeleteDialog = true
+                            },
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(4.dp)
@@ -880,13 +1169,122 @@ fun LightItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceGridScreen(
+    floor: Floor,
     room: Room,
     onBack: () -> Unit,
+    onRefresh: () -> Unit,
     onToggleDevice: (String) -> Unit,
-    onAddDeviceClick: () -> Unit,
-    onDeleteDeviceClick: (String) -> Unit,
     onMultiSwitchClick: (String) -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedDevice by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf("")}
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var textInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Item") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Item ID:")
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Item ID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if(textInput.isEmpty()) return@Button
+                        val req = DeviceRequest(
+                            floorName = floor.name,
+                            roomName = room.name,
+                            itemID = textInput.toIntOrNull() ?: -1,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.addItemToRoomPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                    showAddDialog = false
+                                }else{
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new room")
+                                errorMessage = "Failed to add new item"
+                            }
+                        }
+                    }
+                ) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = DeviceRequest(
+                        floorName = floor.name,
+                        roomName = room.name,
+                        itemID = selectedDevice,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.removeItemFromRoomPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to add new floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -900,7 +1298,9 @@ fun DeviceGridScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onAddDeviceClick,
+                onClick = {
+                    showAddDialog = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
@@ -925,7 +1325,9 @@ fun DeviceGridScreen(
                 DeviceCard(
                     device = device,
                     onToggle = { onToggleDevice(deviceId) },
-                    onDelete = { onDeleteDeviceClick(deviceId) },
+                    onDelete = {
+                        selectedDevice = deviceId.toInt()
+                        showDeleteDialog = true},
                     onMultiSwitchClick = {
                         if (device.type == "MULTISWITCH") {
                             onMultiSwitchClick(deviceId)
