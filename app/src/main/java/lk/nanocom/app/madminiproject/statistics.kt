@@ -1,5 +1,7 @@
 package lk.nanocom.app.madminiproject
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,8 +28,10 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.rememberStartAxis
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
 import com.patrykandpatrick.vico.core.cartesian.data.CartesianChartModelProducer
+import com.patrykandpatrick.vico.core.cartesian.data.CartesianValueFormatter
 import com.patrykandpatrick.vico.core.cartesian.data.lineSeries
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun StatScreen() {
     Column(
@@ -51,9 +55,22 @@ fun StatScreen() {
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun StatisticsChart(modifier: Modifier = Modifier) {
     val modelProducer = remember { CartesianChartModelProducer() }
+
+    val xLabels = remember {
+        val today = java.time.LocalDate.now()
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("EEE")
+        (0..6).map { offset -> today.plusDays(offset.toLong()).format(formatter) }
+    }
+
+    val bottomAxisFormatter = remember(xLabels) {
+        CartesianValueFormatter { value, _, _ ->
+            xLabels.getOrElse(value.toInt()) { value.toString() }
+        }
+    }
 
     LaunchedEffect(Unit) {
         modelProducer.runTransaction {
@@ -75,7 +92,9 @@ fun StatisticsChart(modifier: Modifier = Modifier) {
                 chart = rememberCartesianChart(
                     rememberLineCartesianLayer(),
                     startAxis = rememberStartAxis(),
-                    bottomAxis = rememberBottomAxis()
+                    bottomAxis = rememberBottomAxis(
+                        valueFormatter = bottomAxisFormatter
+                    )
                 ),
                 modelProducer = modelProducer,
                 modifier = Modifier
