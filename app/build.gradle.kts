@@ -89,4 +89,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3") // Check for latest version
 
+    val cameraXVersion = "1.4.0" // Use latest stable version
+    implementation("androidx.camera:camera-camera2:$cameraXVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraXVersion")
+    implementation("androidx.camera:camera-view:$cameraXVersion")
+
+    // Google ML Kit Barcode Scanning (Includes QR Codes)
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+
 }

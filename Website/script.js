@@ -284,15 +284,24 @@ async function loadItems(){
                     break;
             }
 
-            var item_id = document.createElement("h4");
-            item_id.innerText = item.id
+            var item_id = document.createElement("div");
+            item_id.classList.add("qrcode");
             
-            
+            var qrcode = new QRCode(item_id,{
+                text: itemID + "",
+                width: 50,
+                height: 50
+        });
+
+            var item_id_text = document.createElement("h4");
+            item_id_text.innerText = itemID;
+            item_id.appendChild(item_id_text);
 
             
             item_card.appendChild(item_name);
             item_card.appendChild(item_icon);
             item_card.appendChild(item_id);
+
             if(item_action){
                 item_card.appendChild(item_action);
             }

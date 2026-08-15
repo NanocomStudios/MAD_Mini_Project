@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -69,10 +70,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.core.content.ContextCompat
@@ -290,11 +293,13 @@ class MainActivity : ComponentActivity() {
                 } else {
                     SmartHomeApp(
                         startDestination = if (validated) "floors" else "login",
-                        updateFirebaseToken = ::updateFirebaseToken
+                        updateFirebaseToken = ::updateFirebaseToken,
+                        askCameraPermission = ::askCameraPermission
                     )
                 }
             }
         }
+
 
 
     }
@@ -305,6 +310,16 @@ class MainActivity : ComponentActivity() {
                 PackageManager.PERMISSION_GRANTED
             ) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private fun askCameraPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
         }
     }
@@ -349,7 +364,8 @@ enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
 @Composable
 fun SmartHomeApp(
     startDestination: String = "login",
-    updateFirebaseToken: () -> Unit
+    updateFirebaseToken: () -> Unit,
+    askCameraPermission: () -> Unit
 ) {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
@@ -436,6 +452,7 @@ fun SmartHomeApp(
                 }
             )
         }
+
         composable("floors") {
             FloorListScreen(
                 floors = floors.value,
@@ -525,6 +542,10 @@ fun SmartHomeApp(
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
             val floor = floors.value.find { it.id == floorId } ?: return@composable
             val room = floor.rooms.find { it.id == roomId } ?: return@composable
+            val scanResult = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("scan_result", null)
+                .collectAsState(null).value
+
             DeviceGridScreen(
                 floor = floor,
                 room = room,
@@ -599,8 +620,26 @@ fun SmartHomeApp(
                 },
                 onCameraSwitchClick = { deviceID ->
                     navController.navigate("floors/$floorId/rooms/$roomId/camera/$deviceID")
+//                    navController.navigate("floors/\$floorId/rooms/\$roomId/qrscanner")
+                },
+                onScanQRClick = {
+                    navController.navigate("floors/\$floorId/rooms/\$roomId/qrscanner")
+                },
+                scanResult = scanResult,
+                onClearScanResult = {
+                    backStackEntry.savedStateHandle.set("scan_result", null)
                 }
             )
+        }
+
+        composable("floors/{floorId}/rooms/{roomId}/qrscanner"){
+            askCameraPermission()
+            QrScannerScreen { code ->
+                navController.previousBackStackEntry
+                    ?.savedStateHandle
+                    ?.set("scan_result", code)
+//                navController.popBackStack()
+            }
         }
 
         composable(
@@ -1207,12 +1246,26 @@ fun DeviceGridScreen(
     onRefresh: () -> Unit,
     onToggleDevice: (String) -> Unit,
     onMultiSwitchClick: (String) -> Unit,
-    onCameraSwitchClick: (String) -> Unit
+    onCameraSwitchClick: (String) -> Unit,
+    onScanQRClick: () -> Unit,
+    scanResult: String? = null,
+    onClearScanResult: () -> Unit = {}
 ) {
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var selectedDevice by remember { mutableStateOf(0) }
     var errorMessage by remember { mutableStateOf("")}
+
+    var textInput_ID by rememberSaveable { mutableStateOf("") }
+    var textInput_Name by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(scanResult) {
+        scanResult?.let {
+            textInput_ID = it
+            showAddDialog = true
+            onClearScanResult()
+        }
+    }
 
     val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
     val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
@@ -1221,11 +1274,7 @@ fun DeviceGridScreen(
     val context = LocalContext.current
 
     if (showAddDialog) {
-        var textInput_ID by remember { mutableStateOf("") }
-        var textInput_Name by remember { mutableStateOf("") }
-
         var itemType by remember { mutableStateOf("") }
-
         var itemNameBoxVisibility by remember { mutableStateOf(false) }
 
         AlertDialog(
@@ -1244,48 +1293,58 @@ fun DeviceGridScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Button(onClick={
-                        errorMessage = ""
-                        itemNameBoxVisibility = false
-                        textInput_Name = ""
-                        itemType = ""
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(onClick = {
+                            errorMessage = ""
+                            itemNameBoxVisibility = false
+                            textInput_Name = ""
+                            itemType = ""
 
-                        if(textInput_ID.isEmpty()) return@Button
+                            if (textInput_ID.isEmpty()) return@Button
 
-                        val req = ItemInfoRequest(
-                            itemID = textInput_ID.toIntOrNull() ?: -1,
-                            sessionID = saved_sessionID
-                        )
+                            val req = ItemInfoRequest(
+                                itemID = textInput_ID.toIntOrNull() ?: -1,
+                                sessionID = saved_sessionID
+                            )
 
-                        coroutineScope.launch {
-                            try {
-                                val response =
-                                    RetrofitClient.apiService.getItemInfoPostRequest(req)
-                                if (response.isSuccessful && response.body()?.response == "success") {
+                            coroutineScope.launch {
+                                try {
+                                    val response =
+                                        RetrofitClient.apiService.getItemInfoPostRequest(req)
+                                    if (response.isSuccessful && response.body()?.response == "success") {
 
-                                    textInput_Name = response.body()?.itemName ?: ""
-                                    itemType = response.body()?.type ?: ""
-                                    errorMessage = ""
-                                    itemNameBoxVisibility = true
+                                        textInput_Name = response.body()?.itemName ?: ""
+                                        itemType = response.body()?.type ?: ""
+                                        errorMessage = ""
+                                        itemNameBoxVisibility = true
 
-                                } else {
-                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                    } else {
+                                        errorMessage = response.body()?.error ?: "Unknown error"
+                                        textInput_Name = ""
+                                        itemType = ""
+                                        itemNameBoxVisibility = false
+                                    }
+                                } catch (e: Exception) {
+                                    Log.d("API_ERROR", "Failed to add new room")
+                                    errorMessage = "Failed to add new item"
                                     textInput_Name = ""
-                                    itemType = ""
+                                    textInput_ID = ""
                                     itemNameBoxVisibility = false
                                 }
-                            } catch (e: Exception) {
-                                Log.d("API_ERROR", "Failed to add new room")
-                                errorMessage = "Failed to add new item"
-                                textInput_Name = ""
-                                textInput_ID = ""
-                                itemNameBoxVisibility = false
                             }
+
+
+                        }) {
+                            Text("Search")
                         }
-
-
-                    }) {
-                        Text("Search")
+                        Button(onClick = {
+                            onScanQRClick()
+                        }){
+                            Text("Scan")
+                        }
                     }
                     if(itemNameBoxVisibility) {
                         Text(
