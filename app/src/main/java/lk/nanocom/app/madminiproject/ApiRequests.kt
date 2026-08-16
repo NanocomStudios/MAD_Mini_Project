@@ -46,4 +46,10 @@ interface ApiService {
 
     @POST("app/getItemInfo")
     suspend fun getItemInfoPostRequest(@Body request: ItemInfoRequest): Response<ItemInfoResponse>
+
+    @POST("app/scheduleItem")
+    suspend fun scheduleItemPostRequest(@Body request: ScheduleItemRequest): Response<STDResponse>
+
+    @POST("app/setCutoffTime")
+    suspend fun setCutoffTimePostRequest(@Body request: CutoffTimeRequest): Response<STDResponse>
 }

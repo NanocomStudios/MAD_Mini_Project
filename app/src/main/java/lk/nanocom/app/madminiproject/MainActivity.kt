@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,6 +70,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -163,6 +167,21 @@ data class DeviceRequest(
     val roomName: String,
     val itemID: Int,
     val itemName: String = "",
+    val sessionID: String
+)
+
+data class ScheduleItemRequest(
+    val itemID: Int,
+    val action: String,
+    val value: Int,
+    val time_from: String,
+    val time_to: String,
+    val sessionID: String
+)
+
+data class CutoffTimeRequest(
+    val itemID: Int,
+    val cutoffTime: String,
     val sessionID: String
 )
 
@@ -357,7 +376,9 @@ data class Device(
     val status: DeviceStatus = DeviceStatus.OFF,
     val switches: List<SwitchNode>? = emptyList(),
     val stream: String? = "",
-    val maxOnDuration: Int = 0
+    val cuttofftime: String? = "",
+    val time_from: String? = "",
+    val time_to: String? = ""
 )
 
 enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
@@ -520,9 +541,7 @@ fun SmartHomeApp(
             AddNewFloorPopup()
         }
 
-        composable (
-            route = "statistics",
-        ) {
+        composable("floors/{floorId}/rooms/{roomId}/{deviceId}/statgraph") {
             StatScreen()
         }
 
@@ -539,7 +558,10 @@ fun SmartHomeApp(
 
             Log.d("VIDEO", device.stream?: "")
 
-            RtspPlayerScreen(device.stream?: "")
+            RtspPlayerScreen(
+                device,
+                device.stream?: "",
+                onBack = {navController.popBackStack()})
         }
 
         composable(
@@ -676,6 +698,9 @@ fun SmartHomeApp(
                 scanResult = scanResult,
                 onClearScanResult = {
                     backStackEntry.savedStateHandle.set("scan_result", null)
+                },
+                onUsageGraph = {deviceID ->
+                    navController.navigate("floors/$floorId/rooms/$roomId/$deviceID/statgraph")
                 }
             )
         }
@@ -956,20 +981,32 @@ fun FloorListScreen(
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.align(Alignment.Center)
                         )
-                        IconButton(
-                            onClick = {
-                                selectedFloor = floor.name
-                                showDeleteDialog = true
-                            },
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "Delete Device",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete Floor") },
+                                    onClick = {
+                                        expanded = false
+                                        selectedFloor = floor.name
+                                        showDeleteDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1152,20 +1189,32 @@ fun RoomListScreen(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                selectedRoom = room.name
-                                showDeleteDialog = true
-                            },
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "Delete Device",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete Room") },
+                                    onClick = {
+                                        expanded = false
+                                        selectedRoom = room.name
+                                        showDeleteDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1328,7 +1377,8 @@ fun DeviceGridScreen(
     onCameraSwitchClick: (String) -> Unit,
     onScanQRClick: () -> Unit,
     scanResult: String? = null,
-    onClearScanResult: () -> Unit = {}
+    onClearScanResult: () -> Unit = {},
+    onUsageGraph: (String) -> Unit,
 ) {
     var showAddDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -1588,7 +1638,9 @@ fun DeviceGridScreen(
                         if (device.type == "multiswitch") {
                             onMultiSwitchClick(deviceId)
                         }
-                    }
+                    },
+                    onRefresh = onRefresh,
+                    onUsageGraph = {onUsageGraph(deviceId)}
                 )
             }
         }
@@ -1597,13 +1649,142 @@ fun DeviceGridScreen(
 
 fun deviceIdOf(device: Device): String = device.id
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceCard(
     device: Device,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
-    onMultiSwitchClick: () -> Unit
+    onMultiSwitchClick: () -> Unit,
+    onRefresh: () -> Unit,
+    onUsageGraph: () -> Unit
 ) {
+
+    var showScheduleDialog by remember {mutableStateOf(false)}
+    var showSafetyDialog by remember {mutableStateOf(false)}
+
+    var safetyTime by remember {mutableStateOf("0")}
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if(showScheduleDialog){
+        val startTimeState = rememberTimePickerState()
+        val endTimeState = rememberTimePickerState()
+
+        AlertDialog(
+            onDismissRequest = { showScheduleDialog = false },
+            title = { Text(text = "Schedule Item") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("From", style = MaterialTheme.typography.labelLarge)
+                        TimeInput(state = startTimeState)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("To", style = MaterialTheme.typography.labelLarge)
+                        TimeInput(state = endTimeState)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val req = ScheduleItemRequest(
+                            itemID = device.id.toIntOrNull() ?: 0,
+                            action = "toggle",
+                            value = 1,
+                            time_from = "${startTimeState.hour}:${startTimeState.minute}",
+                            time_to = "${endTimeState.hour}:${endTimeState.minute}",
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.scheduleItemPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to schedule")
+                            }
+                        }
+                        showScheduleDialog = false
+                    }
+                ) {
+                    Text("Set")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showScheduleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if(showSafetyDialog){
+        var itemType by remember { mutableStateOf("") }
+        var itemNameBoxVisibility by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showScheduleDialog = false },
+            title = { Text(text = "Safety Cuttoff") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Auto Cuttoff (minutes)"
+                    )
+                    OutlinedTextField(
+                        value = safetyTime,
+                        onValueChange = { safetyTime = it },
+                        label = { Text("Auto Cuttoff (minutes)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val req = CutoffTimeRequest(
+                            itemID = device.id.toIntOrNull() ?: 0,
+                            cutoffTime = safetyTime,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.setCutoffTimePostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to schedule")
+                            }
+                        }
+                        showSafetyDialog = false
+                    }
+                ) {
+                    Text("Set")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showScheduleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Card(
         modifier = Modifier
             .aspectRatio(1f)
@@ -1625,6 +1806,18 @@ fun DeviceCard(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(device.name, style = MaterialTheme.typography.titleSmall)
+                if(device.time_from != null){
+                    Text(
+                        "${device.time_from}:${device.time_to}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if(device.cuttofftime != null && device.cuttofftime != "0"){
+                    Text(
+                        "${device.cuttofftime} Minutes Max",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 StatusBadge(device.status)
 
                 when (device.type) {
@@ -1640,10 +1833,10 @@ fun DeviceCard(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    "safety" -> {
-                        Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
-                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
-                    }
+//                    "safety" -> {
+//                        Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
+//                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+//                    }
                     "camera" -> {
                         Icon(Icons.Default.Videocam, contentDescription = null)
                     }
@@ -1652,17 +1845,61 @@ fun DeviceCard(
                     }
                 }
             }
-            IconButton(
-                onClick = onDelete,
+            var expanded by remember { mutableStateOf(false) }
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(4.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Delete Device",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                IconButton(onClick = { expanded = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    if(device.type == "switch" || device.type == "light") {
+                        DropdownMenuItem(
+                            text = { Text("Schedule Item") },
+                            onClick = {
+                                expanded = false
+                                showScheduleDialog = true
+                            }
+                        )
+                    }
+
+                    if(device.type == "switch" || device.type == "light" || device.type == "multiswitch") {
+                        DropdownMenuItem(
+                            text = { Text("Usage Graph") },
+                            onClick = {
+                                expanded = false
+                                onUsageGraph()
+                            }
+                        )
+                    }
+
+                    if(device.type == "switch") {
+                        DropdownMenuItem(
+                            text = { Text("Set Auto Cuttoff") },
+                            onClick = {
+                                expanded = false
+                                showSafetyDialog = true
+                            }
+                        )
+                    }
+
+                    DropdownMenuItem(
+                        text = { Text("Delete Item") },
+                        onClick = {
+                            expanded = false
+                            onDelete()
+                        }
+                    )
+                }
             }
         }
     }
