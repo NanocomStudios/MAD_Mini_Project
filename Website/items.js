@@ -6,6 +6,12 @@ items = [
                         "id":6,
                         "name":"front_bell",
                         "type":"doorbell"
+                    },
+                    {
+                        "id":12,
+                        "name":"camera1",
+                        "type":"camera",
+                        "stream":"rtsp://132.239.12.145/axis-media/media.amp"
                     }
                 ]
     },
@@ -26,6 +32,16 @@ items = [
                         "id":3,
                         "name":"light3",
                         "type":"light"
+                    },
+                    {
+                        "id":7,
+                        "name":"switch1",
+                        "type":"switch"
+                    },
+                    {
+                        "id":8,
+                        "name":"switch1",
+                        "type":"switch"
                     }
                 ]
     },
@@ -41,6 +57,23 @@ items = [
                         "id":5,
                         "name":"light2",
                         "type":"light"
+                    },
+                    {
+                        "id":9,
+                        "name":"multiswitch1",
+                        "type":"multiswitch",
+                        "items":[
+                            {
+                                "id":10,
+                                "name":"switch1",
+                                "type":"switch"
+                            },
+                            {
+                                "id":11,
+                                "name":"switch2",
+                                "type":"switch"
+                            }
+                        ]
                     }
                 ]
     }

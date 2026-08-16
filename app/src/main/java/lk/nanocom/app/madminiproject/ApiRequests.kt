@@ -25,4 +25,31 @@ interface ApiService {
 
     @POST("app/action")
     suspend fun actionPostRequest(@Body request: AppActionRequest): Response<STDResponse>
+
+    @POST("app/newFloor")
+    suspend fun newFloorPostRequest(@Body request: FloorRequest): Response<STDResponse>
+
+    @POST("app/deleteFloor")
+    suspend fun deleteFloorPostRequest(@Body request: FloorRequest): Response<STDResponse>
+
+    @POST("app/newRoom")
+    suspend fun newRoomPostRequest(@Body request: RoomRequest): Response<STDResponse>
+
+    @POST("app/deleteRoom")
+    suspend fun deleteRoomPostRequest(@Body request: RoomRequest): Response<STDResponse>
+
+    @POST("app/addItemToRoom")
+    suspend fun addItemToRoomPostRequest(@Body request: DeviceRequest): Response<STDResponse>
+
+    @POST("app/removeItemFromRoom")
+    suspend fun removeItemFromRoomPostRequest(@Body request: DeviceRequest): Response<STDResponse>
+
+    @POST("app/getItemInfo")
+    suspend fun getItemInfoPostRequest(@Body request: ItemInfoRequest): Response<ItemInfoResponse>
+
+    @POST("app/scheduleItem")
+    suspend fun scheduleItemPostRequest(@Body request: ScheduleItemRequest): Response<STDResponse>
+
+    @POST("app/setCutoffTime")
+    suspend fun setCutoffTimePostRequest(@Body request: CutoffTimeRequest): Response<STDResponse>
 }

@@ -22,3 +22,16 @@
     height:100px;
     width:100px;
 }
+
+.qrcode{
+    display:flex;
+    justify-content: center;
+    width:100%;
+
+}
+
+.qrcode img{
+    height:50px;
+    width:50px; 
+    margin: 10px;
+}

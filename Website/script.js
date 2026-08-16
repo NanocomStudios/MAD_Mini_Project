@@ -75,7 +75,11 @@ function broadcastMsgHandler(topic, message){
 function itemMsgHandler(itemID, message){
     const action = JSON.parse(message);
     if(action.action == "toggle"){
-        switchLight(itemID, action.value);
+        if(itemList[itemID].type == "switch"){
+            switchSwitch(itemID, action.value);
+        }else if(itemList[itemID].type == "light"){
+            switchLight(itemID, action.value);
+        }
     }
 }
 
@@ -85,6 +89,15 @@ function switchLight(itemID, state){
         document.getElementById(itemID + "_icon").src = "data/light_off.png";
     }else{
         document.getElementById(itemID + "_icon").src = "data/light_on.png";
+    }
+}
+
+function switchSwitch(itemID, state){
+    itemList[itemID].state = (state == 0) ? 0 : 1;
+    if(state == 0){
+        document.getElementById(itemID + "_icon").src = "data/plug_off.png";
+    }else{
+        document.getElementById(itemID + "_icon").src = "data/plug_on.png";
     }
 }
 
@@ -101,7 +114,11 @@ function toggleSwitch(itemID){
         "value":value
     }
 
-    switchLight(itemID, value);
+    if(itemList[itemID].type == "switch"){
+        switchSwitch(itemID, value);
+    }else if(itemList[itemID].type == "light"){
+        switchLight(itemID, value);
+    }
 
     const url = ROOT + "/item/action";
     try{
@@ -150,6 +167,74 @@ async function registerItemOnServer(itemID, itemName, type){
     }
 
     const url = ROOT + "/item/register";
+    while(true){
+        try{
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if(data.response == "success"){
+                return data;
+            }else{
+                console.log("Error");
+                return null;
+            }
+        }catch (error){
+            await delay(5000); // Wait for 5 seconds before retrying
+        }
+    }
+}
+
+async function registerCameraOnServer(itemID, itemName, stream){
+    const payload = {
+        "itemID":itemID,
+        "itemName":itemName,
+        "stream":stream
+    }
+
+    const url = ROOT + "/item/registerCamera";
+    while(true){
+        try{
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if(data.response == "success"){
+                return data;
+            }else{
+                console.log("Error");
+                return null;
+            }
+        }catch (error){
+            await delay(5000); // Wait for 5 seconds before retrying
+        }
+    }
+}
+
+async function registerMultiSwitchOnServer(boxID, itemID){
+    const payload = {
+        "boxID":boxID,
+        "itemID":itemID
+    }
+    const url = ROOT + "/item/registerMultiSwitch";
     while(true){
         try{
             const response = await fetch(url, {
@@ -229,10 +314,53 @@ async function loadItems(){
         for(const item of Object.values(roomItems.items)){
             const itemID = item.id;
 
-            const response = registerItemOnServer(item.id, item.name, item.type);
-            if(response){
-                if(response.itemName){
-                    item.name = response.itemName;
+            if(item.type == "camera"){
+                const response = await registerCameraOnServer(item.id, item.name, item.stream);
+                if(response){
+                    if(response.itemName){
+                        item.name = response.itemName;
+                    }
+                }
+            }else if(item.type == "multiswitch"){
+                for(const subItem of Object.values(item.items)){
+                    const response = await registerItemOnServer(subItem.id, subItem.name, subItem.type);
+                    if(response){
+                        if(response.itemName){
+                            subItem.name = response.itemName;
+                        }
+                    }
+                }
+
+                const response = await registerItemOnServer(item.id, item.name, item.type);
+                if(response){
+                    if(response.itemName){
+                        item.name = response.itemName;
+                    }
+                }
+
+                for(const subItem of Object.values(item.items)){
+                    await registerMultiSwitchOnServer(item.id, subItem.id);
+
+                    client.subscribe("item/" + subItem.id, (err) => {
+                        if (err) {
+                            console.error('Subscription error:', err);
+                        }
+                    });
+
+                    itemList[subItem.id] = {
+                        "name":subItem.name,
+                        "type":subItem.type,
+                        "state":0
+                    }
+                }
+
+            }else{
+
+                const response = await registerItemOnServer(item.id, item.name, item.type);
+                if(response){
+                    if(response.itemName){
+                        item.name = response.itemName;
+                    }
                 }
             }
 
@@ -254,45 +382,97 @@ async function loadItems(){
             var item_name = document.createElement("h3");
             item_name.innerText = item.name;
 
-             var item_action = null;
+            var item_action = null;
 
-            var item_icon = document.createElement("img");
-            switch (item.type) {
-                case "light":
-                    item_icon.src = "data/light_off.png";
-                    item_icon.id= itemID + "_icon";
+            var item_icon = null;
 
-                    item_action = document.createElement("button");
-                    item_action.innerText = "On/Off";
-                    item_action.onclick = function() {
-                        toggleSwitch(itemID);
+            if(item.type == "multiswitch"){
+                item_icon = document.createElement("div");
+
+                for(const subItem of Object.values(item.items)){
+                    var sub_item_icon = document.createElement("img");
+                    switch (subItem.type) {
+                        case "switch":
+                            sub_item_icon.src = "data/plug_off.png";
+                            sub_item_icon.id= subItem.id + "_icon";
+
+                            var sub_item_action = document.createElement("button");
+                            sub_item_action.innerText = "On/Off";
+                            sub_item_action.onclick = function() {
+                                toggleSwitch(subItem.id);
+                            }
+                            item_icon.appendChild(sub_item_icon);
+                            item_icon.appendChild(sub_item_action);
+                            break;
+                        default:
+                            break;
                     }
-                    break;
+                }
 
-                 case "doorbell":
-                    item_icon.src = "data/doorbell.png";
-                    item_icon.id= itemID + "_icon";
+            }else{
+                item_icon = document.createElement("img");
+                switch (item.type) {
+                    case "light":
+                        item_icon.src = "data/light_off.png";
+                        item_icon.id= itemID + "_icon";
 
-                    item_action = document.createElement("button");
-                    item_action.innerText = "Ring";
-                    item_action.onclick = function() {
-                        pressDoorBell(itemID);
-                    }
-                    break;
-            
-                default:
-                    break;
+                        item_action = document.createElement("button");
+                        item_action.innerText = "On/Off";
+                        item_action.onclick = function() {
+                            toggleSwitch(itemID);
+                        }
+                        break;
+
+                    case "switch":
+                        item_icon.src = "data/plug_off.png";
+                        item_icon.id= itemID + "_icon";
+
+                        item_action = document.createElement("button");
+                        item_action.innerText = "On/Off";
+                        item_action.onclick = function() {
+                            toggleSwitch(itemID);
+                        }
+                        break;
+
+                    case "camera":
+                        item_icon.src = "data/camera.png";
+                        item_icon.id= itemID + "_icon";
+                        break;
+
+                    case "doorbell":
+                        item_icon.src = "data/doorbell.png";
+                        item_icon.id= itemID + "_icon";
+
+                        item_action = document.createElement("button");
+                        item_action.innerText = "Ring";
+                        item_action.onclick = function() {
+                            pressDoorBell(itemID);
+                        }
+                        break;
+                
+                    default:
+                        break;
+                }
             }
 
-            var item_id = document.createElement("h4");
-            item_id.innerText = item.id
+            var item_id = document.createElement("div");
+            item_id.classList.add("qrcode");
             
-            
+            var qrcode = new QRCode(item_id,{
+                text: itemID + "",
+                width: 50,
+                height: 50
+        });
+
+            var item_id_text = document.createElement("h4");
+            item_id_text.innerText = itemID;
+            item_id.appendChild(item_id_text);
 
             
             item_card.appendChild(item_name);
             item_card.appendChild(item_icon);
             item_card.appendChild(item_id);
+
             if(item_action){
                 item_card.appendChild(item_action);
             }
@@ -304,6 +484,24 @@ async function loadItems(){
         room_div.appendChild(room_item_section);
         rooms_container.appendChild(room_div);
         
+    }
+    loadMultiSwitches()
+}
+
+async function loadMultiSwitches(){
+    for(const roomItems of items){
+        for(const item of Object.values(roomItems.items)){
+            if(item.type == "multiswitch"){
+                for(const subItem of Object.values(item.items)){
+                    const response = await registerMultiSwitchOnServer(item.id, subItem.id);
+                    if(response){
+                        if(response.itemName){
+                            subItem.name = response.itemName;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

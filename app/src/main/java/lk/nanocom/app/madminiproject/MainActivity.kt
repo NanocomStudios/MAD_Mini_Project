@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -32,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,12 +65,22 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -77,9 +90,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
+
+data class DeviceToggleEvent(
+    val deviceId: String,
+    val isOn: Boolean
+)
+
+object FCMEventManager {
+    private val _deviceEvents = MutableSharedFlow<DeviceToggleEvent>(extraBufferCapacity = 10)
+    val deviceEvents = _deviceEvents.asSharedFlow()
+
+    fun emitEvent(event: DeviceToggleEvent) {
+        _deviceEvents.tryEmit(event)
+    }
+}
 
 data class SessionIDRequest(
     val sessionID: String
@@ -102,6 +133,63 @@ data class AppActionRequest(
     val value: Int,
     val sessionID: String
 )
+
+data class FloorRequest(
+    val floorName: String,
+    val sessionID: String
+)
+
+data class RoomRequest(
+    val floorName: String,
+    val roomName: String,
+    val sessionID: String
+)
+
+data class ItemInfoRequest(
+    val itemID: Int,
+    val sessionID: String
+)
+
+data class ItemInfoResponse(
+    val response: String,
+    val itemID: Int,
+    val itemName: String,
+    val type: String,
+    val state: String,
+    val lastOnTime: String,
+    val cuttofftime: String,
+    val error: String? = null
+
+)
+
+data class DeviceRequest(
+    val floorName: String,
+    val roomName: String,
+    val itemID: Int,
+    val itemName: String = "",
+    val sessionID: String
+)
+
+data class ScheduleItemRequest(
+    val itemID: Int,
+    val action: String,
+    val value: Int,
+    val time_from: String,
+    val time_to: String,
+    val sessionID: String
+)
+
+data class CutoffTimeRequest(
+    val itemID: Int,
+    val cutoffTime: String,
+    val sessionID: String
+)
+
+
+fun isAppInBackground(): Boolean {
+    val currentState = ProcessLifecycleOwner.get().lifecycle.currentState
+    return !currentState.isAtLeast(Lifecycle.State.STARTED)
+}
 
 class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
@@ -224,11 +312,13 @@ class MainActivity : ComponentActivity() {
                 } else {
                     SmartHomeApp(
                         startDestination = if (validated) "floors" else "login",
-                        updateFirebaseToken = ::updateFirebaseToken
+                        updateFirebaseToken = ::updateFirebaseToken,
+                        askCameraPermission = ::askCameraPermission
                     )
                 }
             }
         }
+
 
 
     }
@@ -239,6 +329,16 @@ class MainActivity : ComponentActivity() {
                 PackageManager.PERMISSION_GRANTED
             ) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private fun askCameraPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(Manifest.permission.CAMERA)
             }
         }
     }
@@ -267,14 +367,18 @@ data class SwitchNode(
     val isOn: Boolean
 )
 
+
 data class Device(
     val id: String,
     val name: String,
     val type: String,
-    var isOn: Boolean = false,
-    var status: DeviceStatus = DeviceStatus.OFF,
-    val switches: MutableList<SwitchNode> = mutableListOf(),
-    val maxOnDuration: Int = 0
+    val isOn: Boolean = false,
+    val status: DeviceStatus = DeviceStatus.OFF,
+    val switches: List<SwitchNode>? = emptyList(),
+    val stream: String? = "",
+    val cuttofftime: String? = "",
+    val time_from: String? = "",
+    val time_to: String? = ""
 )
 
 enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
@@ -283,7 +387,8 @@ enum class DeviceStatus { ON, OFF, ERROR, DISCONNECTED }
 @Composable
 fun SmartHomeApp(
     startDestination: String = "login",
-    updateFirebaseToken: () -> Unit
+    updateFirebaseToken: () -> Unit,
+    askCameraPermission: () -> Unit
 ) {
     val navController = rememberNavController()
     val coroutineScope = rememberCoroutineScope()
@@ -317,6 +422,39 @@ fun SmartHomeApp(
 
     LaunchedEffect(Unit) {
         loadFloors()
+
+        FCMEventManager.deviceEvents.collect { event ->
+            Log.d("FCM_EVENT", "Updating UI for device ${event.deviceId} to ${event.isOn}")
+            floors.value = floors.value.map { floor ->
+                floor.copy(rooms = floor.rooms.map { room ->
+                    room.copy(devices = room.devices.map { device ->
+                        if (device.id == event.deviceId) {
+                            device.copy(
+                                isOn = event.isOn,
+                                status = if (event.isOn) DeviceStatus.ON else DeviceStatus.OFF
+                            )
+                        } else {
+                            val updatedSwitches = device.switches?.map { switch ->
+                                if (switch.id == event.deviceId) {
+                                    switch.copy(isOn = event.isOn)
+                                } else switch
+                            }
+
+                            if (updatedSwitches != null && updatedSwitches != device.switches) {
+                                val anyOn = updatedSwitches.any { it.isOn }
+                                device.copy(
+                                    switches = updatedSwitches,
+                                    isOn = anyOn,
+                                    status = if (anyOn) DeviceStatus.ON else DeviceStatus.OFF
+                                )
+                            } else {
+                                device
+                            }
+                        }
+                    })
+                })
+            }
+        }
     }
 
     NavHost(
@@ -330,8 +468,6 @@ fun SmartHomeApp(
         composable("login") {
             LoginScreen(
                 onLoginSuccess = {
-
-
 
                     navController.navigate("floors") {
                         popUpTo("login") {
@@ -354,12 +490,12 @@ fun SmartHomeApp(
                 }
             )
         }
+
         composable("floors") {
             FloorListScreen(
                 floors = floors.value,
                 onFloorClick = { floorId -> navController.navigate("floors/$floorId") },
-                onAddFloorClick = {},
-                onDeleteFloorClick = {},
+                onRefresh = loadFloors,
                 onStatsClick = { navController.navigate("statistics") },
                 onLogoutClick = {
 
@@ -399,12 +535,35 @@ fun SmartHomeApp(
                 }
             )
         }
-        composable (
-            route = "Statistics",
-            //arguments =
+        composable(
+            "floors/new",
         ) {
+            AddNewFloorPopup()
+        }
+
+        composable("floors/{floorId}/rooms/{roomId}/{deviceId}/statgraph") {
             StatScreen()
         }
+
+        composable(
+            route = "floors/{floorId}/rooms/{roomId}/camera/{deviceId}"
+        ){ backStackEntry ->
+            val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
+            val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
+
+            val floor = floors.value.find { it.id == floorId } ?: return@composable
+            val room = floor.rooms.find { it.id == roomId } ?: return@composable
+            val device = room.devices.find { it.id == deviceId } ?: return@composable
+
+            Log.d("VIDEO", device.stream?: "")
+
+            RtspPlayerScreen(
+                device,
+                device.stream?: "",
+                onBack = {navController.popBackStack()})
+        }
+
         composable(
             "floors/{floorId}",
             arguments = listOf(navArgument("floorId") { type = NavType.StringType })
@@ -415,8 +574,7 @@ fun SmartHomeApp(
                 floor = floor,
                 onRoomClick = { roomId -> navController.navigate("floors/$floorId/rooms/$roomId") },
                 onBack = { navController.popBackStack() },
-                onAddRoomClick = {},
-                onDeleteRoomClick = {}
+                onRefresh = loadFloors
             )
         }
         composable(
@@ -430,50 +588,131 @@ fun SmartHomeApp(
             val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
             val floor = floors.value.find { it.id == floorId } ?: return@composable
             val room = floor.rooms.find { it.id == roomId } ?: return@composable
+            val scanResult = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("scan_result", null)
+                .collectAsState(null).value
+
             DeviceGridScreen(
+                floor = floor,
                 room = room,
                 onBack = { navController.popBackStack() },
-                onToggleDevice = {deviceID ->
+                onRefresh = { loadFloors() },
+                onToggleDevice = { deviceID ->
+                    Log.d("APP_DEBUG", "onToggleDevice called for ID: $deviceID")
                     val device = room.devices.find { it.id == deviceID }
-                    device?.let {
-                        when (it.type){
-                            "outlet" -> it.isOn = !it.isOn
-                            "light" -> {
-                                Log.d("APP_MESSAGE", "Light toggled: $deviceID, ${it.isOn}")
-                                val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
-                                val req = AppActionRequest(
-                                    itemID = it.id.toInt(),
-                                    action = "toggle",
-                                    value = if (it.isOn) 0 else 1,
-                                    sessionID = sharedPref.getString("sessionID", "") ?: ""
-                                )
-                                try {
-                                    coroutineScope.launch {
-                                        val response = RetrofitClient.apiService.actionPostRequest(req)
-                                        if (response.isSuccessful && response.body()?.response == "success") {
-                                            withContext(Dispatchers.Main) {
-                                                it.isOn = !it.isOn
-                                            }
-                                        }
+                    device?.let { d ->
+                        val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                        val sessionID = sharedPref.getString("sessionID", "") ?: ""
 
-                                    }
-                                }catch (e: Exception){
-                                    Log.d("API_ERROR", "Network failed")
-
-                                }
-
+                        val updateState = {
+                            Log.d("APP_DEBUG", "Performing state update for $deviceID")
+                            floors.value = floors.value.map { f ->
+                                if (f.id == floorId) {
+                                    f.copy(rooms = f.rooms.map { r ->
+                                        if (r.id == roomId) {
+                                            r.copy(devices = r.devices.map { dev ->
+                                                if (dev.id == deviceID) {
+                                                    val newIsOn = !dev.isOn
+                                                    Log.d("APP_DEBUG", "Found device, toggling to: $newIsOn")
+                                                    dev.copy(
+                                                        isOn = newIsOn,
+                                                        status = if (newIsOn) DeviceStatus.ON else DeviceStatus.OFF
+                                                    )
+                                                } else dev
+                                            })
+                                        } else r
+                                    })
+                                } else f
                             }
                         }
-                        Log.d("APP_MESSAGE", "Device toggled: $deviceID, ${it.isOn}")
-                    }
 
+                        when (d.type) {
+                            "switch" -> {
+                                Log.d("APP_DEBUG", "Sending toggle request for light: $deviceID")
+                                val req = AppActionRequest(
+                                    itemID = d.id.toIntOrNull() ?: 0,
+                                    action = "toggle",
+                                    value = if (d.isOn) 0 else 1,
+                                    sessionID = sessionID
+                                )
+                                coroutineScope.launch {
+                                    try {
+                                        val response = RetrofitClient.apiService.actionPostRequest(req)
+                                        Log.d("APP_DEBUG", "API Response: ${response.code()}, Body: ${response.body()}")
+                                        if (response.isSuccessful && response.body()?.response?.lowercase() == "success") {
+                                            withContext(Dispatchers.Main) {
+                                                updateState()
+                                            }
+                                        } else {
+                                            Log.e("APP_DEBUG", "API Toggle Failed: ${response.body()?.error}")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("APP_DEBUG", "Network Exception: ${e.message}")
+                                    }
+                                }
+                            }
+                            "light" -> {
+                                Log.d("APP_DEBUG", "Sending toggle request for light: $deviceID")
+                                val req = AppActionRequest(
+                                    itemID = d.id.toIntOrNull() ?: 0,
+                                    action = "toggle",
+                                    value = if (d.isOn) 0 else 1,
+                                    sessionID = sessionID
+                                )
+                                coroutineScope.launch {
+                                    try {
+                                        val response = RetrofitClient.apiService.actionPostRequest(req)
+                                        Log.d("APP_DEBUG", "API Response: ${response.code()}, Body: ${response.body()}")
+                                        if (response.isSuccessful && response.body()?.response?.lowercase() == "success") {
+                                            withContext(Dispatchers.Main) {
+                                                updateState()
+                                            }
+                                        } else {
+                                            Log.e("APP_DEBUG", "API Toggle Failed: ${response.body()?.error}")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("APP_DEBUG", "Network Exception: ${e.message}")
+                                    }
+                                }
+                            }
+                            "camera" -> {
+                                navController.navigate("floors/$floorId/rooms/$roomId/camera/$deviceID")
+                            }
+                            else -> {
+                                // Default behavior for other types if toggle is needed
+                                updateState()
+                            }
+                        }
+                    } ?: Log.e("APP_DEBUG", "Device $deviceID not found in room $roomId")
                 },
-                onAddDeviceClick = {},
-                onDeleteDeviceClick = {},
                 onMultiSwitchClick = { deviceId ->
                     navController.navigate("floors/$floorId/rooms/$roomId/multiswitch/$deviceId")
+                },
+                onCameraSwitchClick = { deviceID ->
+                    navController.navigate("floors/$floorId/rooms/$roomId/camera/$deviceID")
+//                    navController.navigate("floors/\$floorId/rooms/\$roomId/qrscanner")
+                },
+                onScanQRClick = {
+                    navController.navigate("floors/\$floorId/rooms/\$roomId/qrscanner")
+                },
+                scanResult = scanResult,
+                onClearScanResult = {
+                    backStackEntry.savedStateHandle.set("scan_result", null)
+                },
+                onUsageGraph = {deviceID ->
+                    navController.navigate("floors/$floorId/rooms/$roomId/$deviceID/statgraph")
                 }
             )
+        }
+
+        composable("floors/{floorId}/rooms/{roomId}/qrscanner"){
+            askCameraPermission()
+            QrScannerScreen { code ->
+                navController.previousBackStackEntry
+                    ?.savedStateHandle
+                    ?.set("scan_result", code)
+//                navController.popBackStack()
+            }
         }
 
         composable(
@@ -492,19 +731,61 @@ fun SmartHomeApp(
             val room = floor.rooms.find { it.id == roomId } ?: return@composable
             val device = room.devices.find { it.id == deviceId }
 
-            if (device != null && device.type == "MULTISWITCH") {
+            if (device != null && device.type == "multiswitch") {
                 MultiSwitchDetailScreen(
                     multiSwitch = device,
                     onBack = { navController.popBackStack() },
                     onSwitchToggle = { switchId ->
-                        val switch = device.switches.find { it.id == switchId }
-                        switch?.let {
-                            val index = device.switches.indexOf(it)
-                            device.switches[index] = it.copy(isOn = !it.isOn)
-                            device.status = if (device.switches.any { it.isOn }) {
-                                DeviceStatus.ON
-                            } else {
-                                DeviceStatus.OFF
+                        Log.d("APP_DEBUG", "onSwitchToggle called for switch: $switchId on device: $deviceId")
+                        
+                        val currentSwitch = device.switches?.find { it.id == switchId }
+                        val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                        val sessionID = sharedPref.getString("sessionID", "") ?: ""
+
+                        val updateState = {
+                            floors.value = floors.value.map { f ->
+                                if (f.id == floorId) {
+                                    f.copy(rooms = f.rooms.map { r ->
+                                        if (r.id == roomId) {
+                                            r.copy(devices = r.devices.map { dev ->
+                                                if (dev.id == deviceId) {
+                                                    val newSwitches = dev.switches?.map { s ->
+                                                        if (s.id == switchId) s.copy(isOn = !s.isOn) else s
+                                                    }
+                                                    Log.d("APP_DEBUG", "Updated switch $switchId")
+                                                    dev.copy(
+                                                        switches = newSwitches,
+                                                        status = if (newSwitches?.any { it.isOn } == true) DeviceStatus.ON else DeviceStatus.OFF
+                                                    )
+                                                } else dev
+                                            })
+                                        } else r
+                                    })
+                                } else f
+                            }
+                        }
+
+                        if (currentSwitch != null) {
+                            val req = AppActionRequest(
+                                itemID = switchId.toIntOrNull() ?: 0,
+                                action = "toggle",
+                                value = if (currentSwitch.isOn) 0 else 1,
+                                sessionID = sessionID
+                            )
+                            coroutineScope.launch {
+                                try {
+                                    val response = RetrofitClient.apiService.actionPostRequest(req)
+                                    Log.d("APP_DEBUG", "API Response: ${response.code()}, Body: ${response.body()}")
+                                    if (response.isSuccessful && response.body()?.response?.lowercase() == "success") {
+                                        withContext(Dispatchers.Main) {
+                                            updateState()
+                                        }
+                                    } else {
+                                        Log.e("APP_DEBUG", "API Toggle Failed: ${response.body()?.error}")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("APP_DEBUG", "Network Exception: ${e.message}")
+                                }
                             }
                         }
                     }
@@ -521,11 +802,116 @@ fun SmartHomeApp(
 fun FloorListScreen(
     floors: List<Floor>,
     onFloorClick: (String) -> Unit,
-    onAddFloorClick: () -> Unit,
+    onRefresh: () -> Unit,
     onStatsClick: () -> Unit,
-    onDeleteFloorClick: (String) -> Unit,
     onLogoutClick: () -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedFloor by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var textInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Floor") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Floor Name:")
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Floor") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                        )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if(textInput.isEmpty()) return@Button
+                        val req = FloorRequest(
+                            floorName = textInput,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.newFloorPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                    showAddDialog = false
+                                }else{
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new floor")
+                                errorMessage = "Failed to add new floor"
+                            }
+                        }
+
+                    }
+                ) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = FloorRequest(
+                        floorName = selectedFloor,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.deleteFloorPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to delete floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Floors") },
@@ -559,7 +945,9 @@ fun FloorListScreen(
                 }
 
                 FloatingActionButton(
-                    onClick = onAddFloorClick,
+                    onClick = {
+                        showAddDialog = true
+                    },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ) {
@@ -593,17 +981,32 @@ fun FloorListScreen(
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.align(Alignment.Center)
                         )
-                        IconButton(
-                            onClick = { onDeleteFloorClick(floor.id) },
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
                                 .padding(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete Floor",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete Floor") },
+                                    onClick = {
+                                        expanded = false
+                                        selectedFloor = floor.name
+                                        showDeleteDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -618,9 +1021,116 @@ fun RoomListScreen(
     floor: Floor,
     onRoomClick: (String) -> Unit,
     onBack: () -> Unit,
-    onAddRoomClick: () -> Unit,
-    onDeleteRoomClick: (String) -> Unit
+    onRefresh: () -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedRoom by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("")}
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var textInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Room") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Room Name:")
+                    OutlinedTextField(
+                        value = textInput,
+                        onValueChange = { textInput = it },
+                        label = { Text("Room") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if(textInput.isEmpty()) return@Button
+                        val req = RoomRequest(
+                            floorName = floor.name,
+                            roomName = textInput,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.newRoomPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                    showAddDialog = false
+                                }else{
+                                    errorMessage = response.body()?.error ?: "Unknown error"
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to add new room")
+                                errorMessage = "Failed to add new room"
+                            }
+                        }
+                    }
+                ) {
+                    Text("Submit")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = RoomRequest(
+                        floorName = floor.name,
+                        roomName = selectedRoom,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.deleteRoomPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to add new floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -634,7 +1144,9 @@ fun RoomListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onAddRoomClick,
+                onClick = {
+                    showAddDialog = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
@@ -677,17 +1189,32 @@ fun RoomListScreen(
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        IconButton(
-                            onClick = { onDeleteRoomClick(room.id) },
+                        var expanded by remember { mutableStateOf(false) }
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Delete Room",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            IconButton(onClick = { expanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete Room") },
+                                    onClick = {
+                                        expanded = false
+                                        selectedRoom = room.name
+                                        showDeleteDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -746,14 +1273,14 @@ fun MultiSwitchDetailScreen(
             }
 
             Text(
-                text = "${multiSwitch.switches.count { it.isOn }}/${multiSwitch.switches.size} switches ON",
+                text = "${multiSwitch.switches?.count { it.isOn } ?: 0}/${multiSwitch.switches?.size ?: 0} switches ON",
                 style = MaterialTheme.typography.titleMedium
             )
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(multiSwitch.switches) { switch ->
+                items(multiSwitch.switches ?: emptyList()) { switch ->
                     SwitchItem(
                         switch = switch,
                         onToggle = { onSwitchToggle(switch.id) }
@@ -841,13 +1368,209 @@ fun LightItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceGridScreen(
+    floor: Floor,
     room: Room,
     onBack: () -> Unit,
+    onRefresh: () -> Unit,
     onToggleDevice: (String) -> Unit,
-    onAddDeviceClick: () -> Unit,
-    onDeleteDeviceClick: (String) -> Unit,
-    onMultiSwitchClick: (String) -> Unit
+    onMultiSwitchClick: (String) -> Unit,
+    onCameraSwitchClick: (String) -> Unit,
+    onScanQRClick: () -> Unit,
+    scanResult: String? = null,
+    onClearScanResult: () -> Unit = {},
+    onUsageGraph: (String) -> Unit,
 ) {
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var selectedDevice by remember { mutableStateOf(0) }
+    var errorMessage by remember { mutableStateOf("")}
+
+    var textInput_ID by rememberSaveable { mutableStateOf("") }
+    var textInput_Name by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(scanResult) {
+        scanResult?.let {
+            textInput_ID = it
+            showAddDialog = true
+            onClearScanResult()
+        }
+    }
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if (showAddDialog) {
+        var itemType by remember { mutableStateOf("") }
+        var itemNameBoxVisibility by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(text = "Add New Item") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Item Code:")
+                    OutlinedTextField(
+                        value = textInput_ID,
+                        onValueChange = { textInput_ID = it },
+                        label = { Text("Code") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(onClick = {
+                            errorMessage = ""
+                            itemNameBoxVisibility = false
+                            textInput_Name = ""
+                            itemType = ""
+
+                            if (textInput_ID.isEmpty()) return@Button
+
+                            val req = ItemInfoRequest(
+                                itemID = textInput_ID.toIntOrNull() ?: -1,
+                                sessionID = saved_sessionID
+                            )
+
+                            coroutineScope.launch {
+                                try {
+                                    val response =
+                                        RetrofitClient.apiService.getItemInfoPostRequest(req)
+                                    if (response.isSuccessful && response.body()?.response == "success") {
+
+                                        textInput_Name = response.body()?.itemName ?: ""
+                                        itemType = response.body()?.type ?: ""
+                                        errorMessage = ""
+                                        itemNameBoxVisibility = true
+
+                                    } else {
+                                        errorMessage = response.body()?.error ?: "Unknown error"
+                                        textInput_Name = ""
+                                        itemType = ""
+                                        itemNameBoxVisibility = false
+                                    }
+                                } catch (e: Exception) {
+                                    Log.d("API_ERROR", "Failed to add new room")
+                                    errorMessage = "Failed to add new item"
+                                    textInput_Name = ""
+                                    textInput_ID = ""
+                                    itemNameBoxVisibility = false
+                                }
+                            }
+
+
+                        }) {
+                            Text("Search")
+                        }
+                        Button(onClick = {
+                            onScanQRClick()
+                        }){
+                            Text("Scan")
+                        }
+                    }
+                    if(itemNameBoxVisibility) {
+                        Text(
+                            "Item Type: $itemType"
+                        )
+                        OutlinedTextField(
+                            value = textInput_Name,
+                            onValueChange = { textInput_Name = it },
+                            label = { Text("Item Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                if(itemNameBoxVisibility) {
+                    Button(
+                        onClick = {
+                            if (textInput_ID.isEmpty()) return@Button
+                            val req = DeviceRequest(
+                                floorName = floor.name,
+                                roomName = room.name,
+                                itemID = textInput_ID.toIntOrNull() ?: -1,
+                                itemName = textInput_Name,
+                                sessionID = saved_sessionID
+                            )
+                            coroutineScope.launch {
+                                try {
+                                    val response =
+                                        RetrofitClient.apiService.addItemToRoomPostRequest(req)
+                                    if (response.isSuccessful && response.body()?.response == "success") {
+                                        onRefresh()
+                                        showAddDialog = false
+                                    } else {
+                                        errorMessage = response.body()?.error ?: "Unknown error"
+                                    }
+                                } catch (e: Exception) {
+                                    Log.d("API_ERROR", "Failed to add new room")
+                                    errorMessage = "Failed to add new item"
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Submit")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Are you sure?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val req = DeviceRequest(
+                        floorName = floor.name,
+                        roomName = room.name,
+                        itemID = selectedDevice,
+                        sessionID = saved_sessionID
+                    )
+                    coroutineScope.launch {
+                        try {
+                            val response = RetrofitClient.apiService.removeItemFromRoomPostRequest(req)
+                            if (response.isSuccessful && response.body()?.response == "success") {
+                                onRefresh()
+                            }
+                        } catch (e: Exception) {
+                            Log.d("API_ERROR", "Failed to add new floor")
+                        }
+                    }
+                    showDeleteDialog = false
+                }) {
+                    Text("Yes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("No")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -860,15 +1583,37 @@ fun DeviceGridScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = onAddDeviceClick,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add Device"
-                )
+                FloatingActionButton(
+                    onClick = {
+                        showAddDialog = true
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Device"
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        onCameraSwitchClick("1")
+                    },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BarChart,
+                        contentDescription = "Statistics"
+                    )
+                }
             }
         }
     ) { padding ->
@@ -886,12 +1631,16 @@ fun DeviceGridScreen(
                 DeviceCard(
                     device = device,
                     onToggle = { onToggleDevice(deviceId) },
-                    onDelete = { onDeleteDeviceClick(deviceId) },
+                    onDelete = {
+                        selectedDevice = deviceId.toInt()
+                        showDeleteDialog = true},
                     onMultiSwitchClick = {
-                        if (device.type == "MULTISWITCH") {
+                        if (device.type == "multiswitch") {
                             onMultiSwitchClick(deviceId)
                         }
-                    }
+                    },
+                    onRefresh = onRefresh,
+                    onUsageGraph = {onUsageGraph(deviceId)}
                 )
             }
         }
@@ -900,18 +1649,147 @@ fun DeviceGridScreen(
 
 fun deviceIdOf(device: Device): String = device.id
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceCard(
     device: Device,
     onToggle: () -> Unit,
     onDelete: () -> Unit,
-    onMultiSwitchClick: () -> Unit
+    onMultiSwitchClick: () -> Unit,
+    onRefresh: () -> Unit,
+    onUsageGraph: () -> Unit
 ) {
+
+    var showScheduleDialog by remember {mutableStateOf(false)}
+    var showSafetyDialog by remember {mutableStateOf(false)}
+
+    var safetyTime by remember {mutableStateOf("0")}
+
+    val sharedPref = LocalContext.current.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+    val saved_sessionID: String = sharedPref.getString("sessionID", "") ?: ""
+
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    if(showScheduleDialog){
+        val startTimeState = rememberTimePickerState()
+        val endTimeState = rememberTimePickerState()
+
+        AlertDialog(
+            onDismissRequest = { showScheduleDialog = false },
+            title = { Text(text = "Schedule Item") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("From", style = MaterialTheme.typography.labelLarge)
+                        TimeInput(state = startTimeState)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("To", style = MaterialTheme.typography.labelLarge)
+                        TimeInput(state = endTimeState)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val req = ScheduleItemRequest(
+                            itemID = device.id.toIntOrNull() ?: 0,
+                            action = "toggle",
+                            value = 1,
+                            time_from = "${startTimeState.hour}:${startTimeState.minute}",
+                            time_to = "${endTimeState.hour}:${endTimeState.minute}",
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.scheduleItemPostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to schedule")
+                            }
+                        }
+                        showScheduleDialog = false
+                    }
+                ) {
+                    Text("Set")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showScheduleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if(showSafetyDialog){
+        var itemType by remember { mutableStateOf("") }
+        var itemNameBoxVisibility by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showScheduleDialog = false },
+            title = { Text(text = "Safety Cuttoff") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Auto Cuttoff (minutes)"
+                    )
+                    OutlinedTextField(
+                        value = safetyTime,
+                        onValueChange = { safetyTime = it },
+                        label = { Text("Auto Cuttoff (minutes)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val req = CutoffTimeRequest(
+                            itemID = device.id.toIntOrNull() ?: 0,
+                            cutoffTime = safetyTime,
+                            sessionID = saved_sessionID
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val response = RetrofitClient.apiService.setCutoffTimePostRequest(req)
+                                if (response.isSuccessful && response.body()?.response == "success") {
+                                    onRefresh()
+                                }
+                            } catch (e: Exception) {
+                                Log.d("API_ERROR", "Failed to schedule")
+                            }
+                        }
+                        showSafetyDialog = false
+                    }
+                ) {
+                    Text("Set")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showScheduleDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Card(
         modifier = Modifier
             .aspectRatio(1f)
             .clickable {
-                if (device.type == "MULTISWITCH") {
+                if (device.type == "multiswitch") {
                     onMultiSwitchClick()
                 } else {
                     onToggle()
@@ -928,25 +1806,37 @@ fun DeviceCard(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(device.name, style = MaterialTheme.typography.titleSmall)
+                if(device.time_from != null){
+                    Text(
+                        "${device.time_from}:${device.time_to}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                if(device.cuttofftime != null && device.cuttofftime != "0"){
+                    Text(
+                        "${device.cuttofftime} Minutes Max",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 StatusBadge(device.status)
 
                 when (device.type) {
-                    "outlet" -> {
+                    "switch" -> {
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
                     "light" -> {
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
-                    "MULTISWITCH" -> {
+                    "multiswitch" -> {
                         Text(
-                            "${device.switches.count { it.isOn }}/${device.switches.size} on",
+                            "${device.switches?.count { it.isOn } ?: 0}/${device.switches?.size ?: 0} on",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    "safety" -> {
-                        Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
-                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
-                    }
+//                    "safety" -> {
+//                        Text("Max ${device.maxOnDuration / 60} min", style = MaterialTheme.typography.bodySmall)
+//                        Switch(checked = device.isOn, onCheckedChange = { onToggle() })
+//                    }
                     "camera" -> {
                         Icon(Icons.Default.Videocam, contentDescription = null)
                     }
@@ -955,17 +1845,61 @@ fun DeviceCard(
                     }
                 }
             }
-            IconButton(
-                onClick = onDelete,
+            var expanded by remember { mutableStateOf(false) }
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(4.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Delete Device",
-                    tint = MaterialTheme.colorScheme.error
-                )
+                IconButton(onClick = { expanded = true }) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    if(device.type == "switch" || device.type == "light") {
+                        DropdownMenuItem(
+                            text = { Text("Schedule Item") },
+                            onClick = {
+                                expanded = false
+                                showScheduleDialog = true
+                            }
+                        )
+                    }
+
+                    if(device.type == "switch" || device.type == "light" || device.type == "multiswitch") {
+                        DropdownMenuItem(
+                            text = { Text("Usage Graph") },
+                            onClick = {
+                                expanded = false
+                                onUsageGraph()
+                            }
+                        )
+                    }
+
+                    if(device.type == "switch") {
+                        DropdownMenuItem(
+                            text = { Text("Set Auto Cuttoff") },
+                            onClick = {
+                                expanded = false
+                                showSafetyDialog = true
+                            }
+                        )
+                    }
+
+                    DropdownMenuItem(
+                        text = { Text("Delete Item") },
+                        onClick = {
+                            expanded = false
+                            onDelete()
+                        }
+                    )
+                }
             }
         }
     }

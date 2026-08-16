@@ -20,12 +20,29 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // TODO: Send this token to your backend server if needed
     }
 
+    private val TAG = "FCM_DATA"
+
     // Triggered when an incoming message is received
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
         // Handle notification payload
         remoteMessage.notification?.let {
-            showNotification(it.title ?: "No Title", it.body ?: "No Body")
+            if(isAppInBackground()) {
+                showNotification(it.title ?: "No Title", it.body ?: "No Body")
+            }
+
+        }
+        Log.d("FCM_STATUS", "Message Received")
+        if (remoteMessage.data.isNotEmpty()) {
+            Log.d(TAG, "Data Payload: ${remoteMessage.data}")
+
+            val deviceId = remoteMessage.data["itemID"]
+            val value = remoteMessage.data["value"]
+
+            if (deviceId != null && value != null) {
+                val isOn = value == "1" || value.lowercase() == "true" || value.lowercase() == "on"
+                FCMEventManager.emitEvent(DeviceToggleEvent(deviceId, isOn))
+            }
         }
     }
 
