@@ -225,6 +225,9 @@ def toggleItemState(itemID, action, value):
                 except Exception as e:
                     print("Error sending message:", e)
 
+            c.execute("INSERT INTO item_log (itemID, state) VALUES (?, ?)", (itemID, str(value)))
+            conn.commit()
+
         conn.close()
 
 def itemScheduleLoop():
@@ -651,6 +654,7 @@ def itemAction(action: ItemAction):
             c.execute("UPDATE items SET lastOnTime=? WHERE itemID=?", (str(time.time()), action.itemID))
 
         c.execute("UPDATE items SET state=? WHERE itemID=?", (str(action.value), action.itemID))
+        c.execute("INSERT INTO item_log (itemID, state) VALUES (?, ?)", (action.itemID, str(action.value)))
         conn.commit()
 
         c.execute("SELECT cuttoffTime FROM items WHERE itemID=?", (action.itemID,))
@@ -764,7 +768,9 @@ def appAction(action: AppAction):
                 c.execute("UPDATE items SET lastOnTime=? WHERE itemID=?", (str(time.time()), action.itemID))
 
             c.execute("UPDATE items SET state=? WHERE itemID=?", (str(action.value), action.itemID))
+            c.execute("INSERT INTO item_log (itemID, state) VALUES (?, ?)", (action.itemID, str(action.value)))
             conn.commit()
+
 
             c.execute("SELECT cuttoffTime FROM items WHERE itemID=?", (action.itemID,))
             result = c.fetchone()
@@ -1218,6 +1224,38 @@ def appGetRooms(session: Session):
     except sqlite3.IntegrityError:
         conn.close()
         return {"response": "failure", "error": "Error: retrieving rooms!"}
+
+@app.post("/app/getItemLog")
+def appGetItemLog(appItem: AppItem):
+    is_valid = isSessionValid(appItem.sessionID)
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        if(is_valid):
+
+            c.execute("SELECT * FROM items WHERE itemID=?", (appItem.itemID,))
+            item = c.fetchone()
+            if not item:
+                conn.close()
+                return {"response": "failure", "error": "Item not found!"}
+
+            c.execute("SELECT * FROM item_log WHERE itemID=? ORDER BY timestamp DESC LIMIT 100", (appItem.itemID,))
+            logs = c.fetchall()
+
+            log_list = []
+            for log in logs:
+                log_list.append({"itemID": log[1], "state": log[2], "timestamp": log[3]})
+
+            conn.close()
+
+            return {"response": "success", "itemID": appItem.itemID, "logs": log_list}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Invalid session ID!"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: retrieving item logs!"}
 
 # try:
     # 7. Publish messages periodically

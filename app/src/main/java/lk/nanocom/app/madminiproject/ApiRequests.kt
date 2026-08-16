@@ -52,4 +52,7 @@ interface ApiService {
 
     @POST("app/setCutoffTime")
     suspend fun setCutoffTimePostRequest(@Body request: CutoffTimeRequest): Response<STDResponse>
+
+    @POST("app/getItemLog")
+    suspend fun getItemLogPostRequest(@Body request: ItemInfoRequest): Response<ItemLogResponse>
 }

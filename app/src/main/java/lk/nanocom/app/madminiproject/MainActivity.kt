@@ -13,7 +13,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -60,6 +59,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.FloatingActionButton
 import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
@@ -160,6 +160,19 @@ data class ItemInfoResponse(
     val cuttofftime: String,
     val error: String? = null
 
+)
+
+data class LogEntry(
+    val itemID: Int,
+    val state: String,
+    val timestamp: String
+)
+
+data class ItemLogResponse(
+    val response: String,
+    val itemID: Int,
+    val logs: List<LogEntry>,
+    val error: String? = null
 )
 
 data class DeviceRequest(
@@ -541,8 +554,16 @@ fun SmartHomeApp(
             AddNewFloorPopup()
         }
 
-        composable("floors/{floorId}/rooms/{roomId}/{deviceId}/statgraph") {
-            StatScreen()
+        composable(
+            "floors/{floorId}/rooms/{roomId}/{deviceId}/statgraph",
+            arguments = listOf(
+                navArgument("floorId") { type = NavType.StringType },
+                navArgument("roomId") { type = NavType.StringType },
+                navArgument("deviceId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val deviceId = backStackEntry.arguments?.getString("deviceId")
+            StatScreen(deviceId)
         }
 
         composable(
@@ -925,37 +946,18 @@ fun FloorListScreen(
                 }
             )
         },
-        floatingActionButtonPosition = FabPosition.Center,
         floatingActionButton = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+            FloatingActionButton(
+                onClick = {
+                    showAddDialog = true
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
-                FloatingActionButton(
-                    onClick = onStatsClick,
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.BarChart,
-                        contentDescription = "Statistics"
-                    )
-                }
-
-                FloatingActionButton(
-                    onClick = {
-                        showAddDialog = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = "Add"
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "Add"
+                )
             }
 
         }
@@ -1328,43 +1330,6 @@ fun SwitchItem(
     }
 }
 
-@Composable
-fun LightItem(
-    switch: SwitchNode,
-    onToggle: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onToggle() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Light ${switch.id.takeLast(1)}",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = if (switch.isOn) "ON" else "OFF",
-                    color = if (switch.isOn) Color(0xFF4CAF50) else Color(0xFF9E9E9E),
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Switch(
-                checked = switch.isOn,
-                onCheckedChange = { onToggle() }
-            )
-        }
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceGridScreen(
@@ -1583,37 +1548,18 @@ fun DeviceGridScreen(
             )
         },
         floatingActionButton = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                FloatingActionButton(
-                    onClick = {
-                        showAddDialog = true
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add Device"
-                    )
-                }
 
-                FloatingActionButton(
-                    onClick = {
-                        onCameraSwitchClick("1")
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.BarChart,
-                        contentDescription = "Statistics"
-                    )
-                }
+            FloatingActionButton(
+                onClick = {
+                    showAddDialog = true
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Device"
+                )
             }
         }
     ) { padding ->
