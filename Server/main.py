@@ -51,6 +51,37 @@ c.execute("CREATE TABLE IF NOT EXISTS items (\
             cuttoffTime TEXT NOT NULL DEFAULT '0'\
           )")
 
+c.execute("CREATE TABLE IF NOT EXISTS item_log(\
+            logID INTEGER PRIMARY KEY AUTOINCREMENT,\
+            itemID INTEGER NOT NULL,\
+            state TEXT NOT NULL,\
+            timestamp TEXT NOT NULL DEFAULT (datetime('now')),\
+            FOREIGN KEY(itemID) REFERENCES items(itemID)\
+            )")
+
+c.execute("CREATE TABLE IF NOT EXISTS item_schedule(\
+            scheduleID INTEGER PRIMARY KEY AUTOINCREMENT,\
+            itemID INTEGER NOT NULL,\
+            action TEXT NOT NULL,\
+            value TEXT NOT NULL,\
+            time TEXT NOT NULL,\
+            FOREIGN KEY(itemID) REFERENCES items(itemID)\
+          )")
+
+c.execute("CREATE TABLE IF NOT EXISTS multiswitch(\
+            boxID INTEGER NOT NULL,\
+            itemID INTEGER NOT NULL,\
+            PRIMARY KEY (boxID, itemID),\
+            FOREIGN KEY(boxID) REFERENCES items(itemID),\
+            FOREIGN KEY(itemID) REFERENCES items(itemID)\
+        )")
+
+c.execute("CREATE TABLE IF NOT EXISTS camera(\
+            itemID INTEGER PRIMARY KEY,\
+            stream TEXT NOT NULL,\
+            FOREIGN KEY(itemID) REFERENCES items(itemID)\
+          )")
+
 c.execute("CREATE TABLE IF NOT EXISTS rooms (\
             roomID INTEGER PRIMARY KEY AUTOINCREMENT,\
             roomName TEXT NOT NULL,\
@@ -130,6 +161,49 @@ itemUpdateThread = threading.Thread(target=itemUpdateLoop)
 itemUpdateThread.daemon = True
 itemUpdateThread.start()
 
+
+
+def itemScheduleLoop():
+    while True:
+        conn = sqlite3.connect('items.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM item_schedule")
+        schedulerItems = c.fetchall()
+        conn.close()
+
+        current_time = time.strftime("%H:%M")
+        for item in schedulerItems:
+            scheduleID, itemID, action, value, scheduled_time = item
+            if scheduled_time == current_time:
+                payload = {"action":action, "value": value}
+                client.publish("item/" + str(itemID) , payload=json.dumps(payload), qos=1)
+                print(f"Scheduled action sent for item {itemID}: {action} with value {value}")
+        time.sleep(60)
+
+itemScheduleThread = threading.Thread(target=itemScheduleLoop)
+itemScheduleThread.daemon = True
+itemScheduleThread.start()
+
+def itemUsageWarningLoop():
+    while True:
+        conn = sqlite3.connect('items.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM items")
+        items = c.fetchall()
+        conn.close()
+
+        for item in items:
+            itemID, itemName, itemType, state, lastOnTime, cuttoffTime = item
+            if cuttoffTime != '0' and state == '1':
+                current_time = time.time()
+                elapsed_time = current_time - float(lastOnTime)
+                if elapsed_time > float(cuttoffTime):
+                    payload = {"action":"warning", "value": "Usage time exceeded!"}
+                    client.publish("item/" + str(itemID) , payload=json.dumps(payload), qos=1)
+                    print(f"Warning sent for item {itemID}: Usage time exceeded!")
+        time.sleep(60)
+
+
 app = FastAPI()
 
 app.add_middleware(
@@ -158,6 +232,15 @@ class Item(BaseModel):
     itemName: str
     itemType: str
 
+class Camera(BaseModel):
+    itemID: int
+    itemName: str
+    stream: str
+
+class MultiSwitch(BaseModel):
+    boxID: int
+    itemID: int
+
 class AppAction(BaseModel):
     itemID: int
     action: str
@@ -182,6 +265,13 @@ class RoomItem(BaseModel):
 
 class AppItem(BaseModel):
     itemID: int
+    sessionID: str
+
+class AppScheduleItem(BaseModel):
+    itemID: int
+    action: str
+    value: int
+    time: str
     sessionID: str
 
 class ItemAction(BaseModel):
@@ -302,15 +392,72 @@ def itemRegister(item: Item):
             conn.close()
             return {"response": "failure", "error": "Error registering the item!"}
 
+@app.post("/item/registerCamera")
+def itemRegisterCamera(camera: Camera):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM items WHERE itemID=?", (camera.itemID,))
+    result = c.fetchone()
+    if result:
+        if(result[2] == "camera"):
+            try:
+                c.execute("INSERT OR REPLACE INTO camera (itemID, stream) VALUES (?, ?)", (camera.itemID, camera.stream))
+                conn.commit()
+                conn.close()
+                return {"response": "success", "itemName": result[1]}
+            except sqlite3.IntegrityError:
+                conn.close()
+                return {"response": "failure", "error": "Error registering the camera!"}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Different item with the same item ID exists!"}
+    else:
+        try:
+            c.execute("INSERT INTO items (itemID, itemName, type) VALUES (?, ?, ?)", (camera.itemID, camera.itemName, "camera"))
+            c.execute("INSERT INTO camera (itemID, stream) VALUES (?, ?)", (camera.itemID, camera.stream))
+            conn.commit()
+            conn.close()
+            return {"response": "success"}
+        except sqlite3.IntegrityError:
+            conn.close()
+            return {"response": "failure", "error": "Error registering the camera!"}
+
+@app.post("/item/registerMultiSwitch")
+def itemRegisterMultiSwitch(multiSwitch: MultiSwitch):
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM items WHERE itemID=?", (multiSwitch.boxID,))
+    result = c.fetchone()
+    if result:
+        if(result[2] == "multiswitch"):
+            try:
+                c.execute("INSERT OR REPLACE INTO multiswitch (boxID, itemID) VALUES (?, ?)", (multiSwitch.boxID, multiSwitch.itemID))
+                conn.commit()
+                conn.close()
+                return {"response": "success", "boxID": multiSwitch.boxID, "itemID": multiSwitch.itemID}
+            except sqlite3.IntegrityError:
+                conn.close()
+                return {"response": "failure", "error": "Error registering the multi-switch!"}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Different item with the same box ID exists!"}
+    else:
+        conn.close()
+        return {"response": "failure", "error": "Box ID not found!"}
+
 @app.post("/item/action")
 def itemAction(action: ItemAction):
     conn = sqlite3.connect('items.db')
     c = conn.cursor()
     try:
+
+        if(action.action == "toggle" and action.value == 1):
+            c.execute("UPDATE items SET lastOnTime=? WHERE itemID=?", (str(time.time()), action.itemID))
+
         c.execute("UPDATE items SET state=? WHERE itemID=?", (str(action.value), action.itemID))
         conn.commit()
 
-        c.execute("SELECT * FROM room_items WHERE itemID=?", (action.itemID,))
+        c.execute("SELECT * FROM room_items WHERE itemID=? OR itemID IN (SELECT boxID FROM multiswitch WHERE ItemID=?)", (action.itemID,action.itemID))
         result = c.fetchall()
         for row in result:
             roomID = row[0]
@@ -380,10 +527,13 @@ def appAction(action: AppAction):
 
         if(is_valid):
 
+            if(action.action == "toggle" and action.value == 1):
+                c.execute("UPDATE items SET lastOnTime=? WHERE itemID=?", (str(time.time()), action.itemID))
+
             c.execute("UPDATE items SET state=? WHERE itemID=?", (str(action.value), action.itemID))
             conn.commit()
 
-            c.execute("SELECT * FROM room_items WHERE itemID=?", (action.itemID,))
+            c.execute("SELECT * FROM room_items WHERE itemID=? OR itemID IN (SELECT boxID FROM multiswitch WHERE ItemID=?)", (action.itemID,action.itemID))
             result = c.fetchall()
             for row in result:
                 roomID = row[0]
@@ -403,18 +553,22 @@ def appAction(action: AppAction):
                     "value": str(action.value)
                 }
 
+                c.execute("SELECT * FROM sessions WHERE sessionID=?", (action.sessionID,))
+                device_session = c.fetchone()
+
                 for session in sessions:
                     sessionID = session[0]
-                    message = messaging.Message(
-                        notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
-                        data=push_notification_data,
-                        token=session[3] # Target specific device
-                    )
-                    try:
-                        response = messaging.send(message)
-                        print("Successfully sent message:", response)
-                    except Exception as e:
-                        print("Error sending message:", e)
+                    if(device_session[3] != session[3]):  # Avoid sending notification to the same device that initiated the action
+                        message = messaging.Message(
+                            notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
+                            data=push_notification_data,
+                            token=session[3] # Target specific device
+                        )
+                        try:
+                            response = messaging.send(message)
+                            print("Successfully sent message:", response)
+                        except Exception as e:
+                            print("Error sending message:", e)
 
             payload = {"action":action.action, "value": action.value}
             client.publish("item/" + str(action.itemID) , payload=json.dumps(payload), qos=1)
@@ -677,6 +831,32 @@ def appRemoveItemFromRoom(roomItem: RoomItem):
         conn.close()
         return {"response": "failure", "error": "Error: removing item from the room!"}
 
+@app.post("/app/scheduleItem")
+def appScheduleItem(scheduleItem: AppScheduleItem):
+    is_valid = isSessionValid(scheduleItem.sessionID)
+
+    conn = sqlite3.connect('items.db')
+    c = conn.cursor()
+    try:
+        if(is_valid):
+
+            c.execute("SELECT * FROM items WHERE itemID=?", (scheduleItem.itemID,))
+            item = c.fetchone()
+            if not item:
+                conn.close()
+                return {"response": "failure", "error": "Item not found!"}
+
+            c.execute("INSERT INTO item_schedule (itemID, action, value, time) VALUES (?, ?, ?, ?)", (scheduleItem.itemID, scheduleItem.action, str(scheduleItem.value), scheduleItem.time))
+            conn.commit()
+            conn.close()
+
+            return {"response": "success", "itemID": scheduleItem.itemID, "action": scheduleItem.action, "value": scheduleItem.value, "time": scheduleItem.time}
+        else:
+            conn.close()
+            return {"response": "failure", "error": "Invalid session ID!"}
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"response": "failure", "error": "Error: scheduling item!"}
 
 @app.post("/app/getItemInfo")
 def appGetItemInfo(appItem: AppItem):
@@ -747,7 +927,26 @@ def appGetRooms(session: Session):
                             status = "OFF" if (item_data[3] == '0') else "ON"
                             isOn = True if item_data[3] == '1' else False
 
-                            itemIDs.append({"id": item_data[0], "name": item_data[1], "type": item_data[2], "status": status, "isOn": isOn})
+                            if(item_data[2] == "camera"):
+                                c.execute("SELECT * FROM camera WHERE itemID=?", (item_data[0],))
+                                camera_data = c.fetchone()
+                                if camera_data:
+                                    itemIDs.append({"id": item_data[0], "name": item_data[1], "type": item_data[2], "status": status, "isOn": isOn, "stream": camera_data[1]})
+                            elif(item_data[2] == "multiswitch"):
+                                c.execute("SELECT * FROM multiswitch WHERE boxID=?", (item_data[0],))
+                                switch_data = c.fetchall()
+                                if switch_data:
+                                    switches = []
+                                    for switch in switch_data:
+                                        c.execute("SELECT * FROM items WHERE itemID=?", (switch[1],))
+                                        switch_item_data = c.fetchone()
+                                        if switch_item_data:
+                                            switch_status = "OFF" if (switch_item_data[3] == '0') else "ON"
+                                            switch_isOn = True if switch_item_data[3] == '1' else False
+                                            switches.append({"id": switch_item_data[0], "name": switch_item_data[1], "type": switch_item_data[2], "status": switch_status, "isOn": switch_isOn})
+                                    itemIDs.append({"id": item_data[0], "name": item_data[1], "type": item_data[2], "status": status, "isOn": isOn, "switches": switches})
+                            else:
+                                itemIDs.append({"id": item_data[0], "name": item_data[1], "type": item_data[2], "status": status, "isOn": isOn})
                     room_list.append({"id": roomID, "name": roomName, "devices": itemIDs})
 
                 floor_list.append({"id": floorID, "name": floorName, "rooms": room_list})

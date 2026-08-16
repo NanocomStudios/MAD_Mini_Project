@@ -348,6 +348,7 @@ data class SwitchNode(
     val isOn: Boolean
 )
 
+
 data class Device(
     val id: String,
     val name: String,
@@ -355,6 +356,7 @@ data class Device(
     val isOn: Boolean = false,
     val status: DeviceStatus = DeviceStatus.OFF,
     val switches: List<SwitchNode>? = emptyList(),
+    val stream: String? = "",
     val maxOnDuration: Int = 0
 )
 
@@ -410,7 +412,24 @@ fun SmartHomeApp(
                                 isOn = event.isOn,
                                 status = if (event.isOn) DeviceStatus.ON else DeviceStatus.OFF
                             )
-                        } else device
+                        } else {
+                            val updatedSwitches = device.switches?.map { switch ->
+                                if (switch.id == event.deviceId) {
+                                    switch.copy(isOn = event.isOn)
+                                } else switch
+                            }
+
+                            if (updatedSwitches != null && updatedSwitches != device.switches) {
+                                val anyOn = updatedSwitches.any { it.isOn }
+                                device.copy(
+                                    switches = updatedSwitches,
+                                    isOn = anyOn,
+                                    status = if (anyOn) DeviceStatus.ON else DeviceStatus.OFF
+                                )
+                            } else {
+                                device
+                            }
+                        }
                     })
                 })
             }
@@ -428,8 +447,6 @@ fun SmartHomeApp(
         composable("login") {
             LoginScreen(
                 onLoginSuccess = {
-
-
 
                     navController.navigate("floors") {
                         popUpTo("login") {
@@ -513,9 +530,16 @@ fun SmartHomeApp(
             route = "floors/{floorId}/rooms/{roomId}/camera/{deviceId}"
         ){ backStackEntry ->
             val deviceId = backStackEntry.arguments?.getString("deviceId") ?: return@composable
-//            RtspPlayerScreen(it.arguments?.getString("streamURL") ?: "")
-            //rtsp://132.239.12.145/axis-media/media.amp
-            RtspPlayerScreen("rtsp://132.239.12.145/axis-media/media.amp")
+            val floorId = backStackEntry.arguments?.getString("floorId") ?: return@composable
+            val roomId = backStackEntry.arguments?.getString("roomId") ?: return@composable
+
+            val floor = floors.value.find { it.id == floorId } ?: return@composable
+            val room = floor.rooms.find { it.id == roomId } ?: return@composable
+            val device = room.devices.find { it.id == deviceId } ?: return@composable
+
+            Log.d("VIDEO", device.stream?: "")
+
+            RtspPlayerScreen(device.stream?: "")
         }
 
         composable(
@@ -581,8 +605,29 @@ fun SmartHomeApp(
                         }
 
                         when (d.type) {
-                            "outlet" -> {
-                                updateState()
+                            "switch" -> {
+                                Log.d("APP_DEBUG", "Sending toggle request for light: $deviceID")
+                                val req = AppActionRequest(
+                                    itemID = d.id.toIntOrNull() ?: 0,
+                                    action = "toggle",
+                                    value = if (d.isOn) 0 else 1,
+                                    sessionID = sessionID
+                                )
+                                coroutineScope.launch {
+                                    try {
+                                        val response = RetrofitClient.apiService.actionPostRequest(req)
+                                        Log.d("APP_DEBUG", "API Response: ${response.code()}, Body: ${response.body()}")
+                                        if (response.isSuccessful && response.body()?.response?.lowercase() == "success") {
+                                            withContext(Dispatchers.Main) {
+                                                updateState()
+                                            }
+                                        } else {
+                                            Log.e("APP_DEBUG", "API Toggle Failed: ${response.body()?.error}")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("APP_DEBUG", "Network Exception: ${e.message}")
+                                    }
+                                }
                             }
                             "light" -> {
                                 Log.d("APP_DEBUG", "Sending toggle request for light: $deviceID")
@@ -607,6 +652,9 @@ fun SmartHomeApp(
                                         Log.e("APP_DEBUG", "Network Exception: ${e.message}")
                                     }
                                 }
+                            }
+                            "camera" -> {
+                                navController.navigate("floors/$floorId/rooms/$roomId/camera/$deviceID")
                             }
                             else -> {
                                 // Default behavior for other types if toggle is needed
@@ -658,31 +706,62 @@ fun SmartHomeApp(
             val room = floor.rooms.find { it.id == roomId } ?: return@composable
             val device = room.devices.find { it.id == deviceId }
 
-            if (device != null && device.type == "MULTISWITCH") {
+            if (device != null && device.type == "multiswitch") {
                 MultiSwitchDetailScreen(
                     multiSwitch = device,
                     onBack = { navController.popBackStack() },
                     onSwitchToggle = { switchId ->
                         Log.d("APP_DEBUG", "onSwitchToggle called for switch: $switchId on device: $deviceId")
-                        floors.value = floors.value.map { f ->
-                            if (f.id == floorId) {
-                                f.copy(rooms = f.rooms.map { r ->
-                                    if (r.id == roomId) {
-                                        r.copy(devices = r.devices.map { dev ->
-                                            if (dev.id == deviceId) {
-                                                val newSwitches = dev.switches?.map { s ->
-                                                    if (s.id == switchId) s.copy(isOn = !s.isOn) else s
-                                                }
-                                                Log.d("APP_DEBUG", "Updated switch $switchId")
-                                                dev.copy(
-                                                    switches = newSwitches,
-                                                    status = if (newSwitches?.any { it.isOn } == true) DeviceStatus.ON else DeviceStatus.OFF
-                                                )
-                                            } else dev
-                                        })
-                                    } else r
-                                })
-                            } else f
+                        
+                        val currentSwitch = device.switches?.find { it.id == switchId }
+                        val sharedPref = context.getSharedPreferences("Cookies", Context.MODE_PRIVATE)
+                        val sessionID = sharedPref.getString("sessionID", "") ?: ""
+
+                        val updateState = {
+                            floors.value = floors.value.map { f ->
+                                if (f.id == floorId) {
+                                    f.copy(rooms = f.rooms.map { r ->
+                                        if (r.id == roomId) {
+                                            r.copy(devices = r.devices.map { dev ->
+                                                if (dev.id == deviceId) {
+                                                    val newSwitches = dev.switches?.map { s ->
+                                                        if (s.id == switchId) s.copy(isOn = !s.isOn) else s
+                                                    }
+                                                    Log.d("APP_DEBUG", "Updated switch $switchId")
+                                                    dev.copy(
+                                                        switches = newSwitches,
+                                                        status = if (newSwitches?.any { it.isOn } == true) DeviceStatus.ON else DeviceStatus.OFF
+                                                    )
+                                                } else dev
+                                            })
+                                        } else r
+                                    })
+                                } else f
+                            }
+                        }
+
+                        if (currentSwitch != null) {
+                            val req = AppActionRequest(
+                                itemID = switchId.toIntOrNull() ?: 0,
+                                action = "toggle",
+                                value = if (currentSwitch.isOn) 0 else 1,
+                                sessionID = sessionID
+                            )
+                            coroutineScope.launch {
+                                try {
+                                    val response = RetrofitClient.apiService.actionPostRequest(req)
+                                    Log.d("APP_DEBUG", "API Response: ${response.code()}, Body: ${response.body()}")
+                                    if (response.isSuccessful && response.body()?.response?.lowercase() == "success") {
+                                        withContext(Dispatchers.Main) {
+                                            updateState()
+                                        }
+                                    } else {
+                                        Log.e("APP_DEBUG", "API Toggle Failed: ${response.body()?.error}")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("APP_DEBUG", "Network Exception: ${e.message}")
+                                }
+                            }
                         }
                     }
                 )
@@ -1506,7 +1585,7 @@ fun DeviceGridScreen(
                         selectedDevice = deviceId.toInt()
                         showDeleteDialog = true},
                     onMultiSwitchClick = {
-                        if (device.type == "MULTISWITCH") {
+                        if (device.type == "multiswitch") {
                             onMultiSwitchClick(deviceId)
                         }
                     }
@@ -1529,7 +1608,7 @@ fun DeviceCard(
         modifier = Modifier
             .aspectRatio(1f)
             .clickable {
-                if (device.type == "MULTISWITCH") {
+                if (device.type == "multiswitch") {
                     onMultiSwitchClick()
                 } else {
                     onToggle()
@@ -1549,13 +1628,13 @@ fun DeviceCard(
                 StatusBadge(device.status)
 
                 when (device.type) {
-                    "outlet" -> {
+                    "switch" -> {
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
                     "light" -> {
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
-                    "MULTISWITCH" -> {
+                    "multiswitch" -> {
                         Text(
                             "${device.switches?.count { it.isOn } ?: 0}/${device.switches?.size ?: 0} on",
                             style = MaterialTheme.typography.bodySmall
