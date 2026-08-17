@@ -46,12 +46,12 @@ fun StatScreen(deviceId: String? = null) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF252525))
+            .background(MaterialTheme.colorScheme.background)
             .padding(top = 48.dp, start = 24.dp, end = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             text = "Statistics",
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.headlineMedium,
@@ -67,7 +67,7 @@ fun StatScreen(deviceId: String? = null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = "Please select a device from the room screen to view statistics.",
-                    color = Color.Gray,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -173,7 +173,7 @@ fun StatisticsChart(deviceId: String?, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             VerticalText(
                 text = "On-time (min)",
-                color = Color.White
+                color = MaterialTheme.colorScheme.onBackground
             )
 
             CartesianChartHost(
@@ -193,7 +193,7 @@ fun StatisticsChart(deviceId: String?, modifier: Modifier = Modifier) {
 
         Text(
             text = "Last 7 Days",
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(top = 4.dp)
         )
@@ -203,7 +203,7 @@ fun StatisticsChart(deviceId: String?, modifier: Modifier = Modifier) {
 @Composable
 private fun VerticalText(
     text: String,
-    color: Color = Color.White
+    color: Color = MaterialTheme.colorScheme.onBackground
 ) {
     Layout(
         content = {

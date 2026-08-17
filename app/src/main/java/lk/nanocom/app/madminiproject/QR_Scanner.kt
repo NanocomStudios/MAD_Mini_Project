@@ -34,42 +34,41 @@ class QrCodeAnalyzer(
 
     // Configure ML Kit to scan specifically for QR codes
     private val scanner = BarcodeScanning.getClient()
-    private var lastAnalyzedTimestamp = 0L
+    private var isScanning = true
 
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
-        val currentTime = System.currentTimeMillis()
-        // Throttling: only process one frame every 1000ms (1 second)
-        if (currentTime - lastAnalyzedTimestamp >= 1000) {
-            lastAnalyzedTimestamp = currentTime
+        if (!isScanning) {
+            imageProxy.close()
+            return
+        }
 
-            val mediaImage = imageProxy.image
-            if (mediaImage != null) {
-                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+        val mediaImage = imageProxy.image
+        if (mediaImage != null) {
+            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
 
-                scanner.process(image)
-                    .addOnSuccessListener { barcodes ->
-                        for (barcode in barcodes) {
-                            // Check if the detected barcode format is a QR Code
-                            if (barcode.valueType != Barcode.TYPE_UNKNOWN) {
-                                barcode.rawValue?.let { qrValue ->
-                                    onQrCodeDetected(qrValue)
-                                }
+            scanner.process(image)
+                .addOnSuccessListener { barcodes ->
+                    if (!isScanning) return@addOnSuccessListener
+                    for (barcode in barcodes) {
+                        // Check if the detected barcode format is a QR Code
+                        if (barcode.valueType != Barcode.TYPE_UNKNOWN) {
+                            barcode.rawValue?.let { qrValue ->
+                                isScanning = false
+                                onQrCodeDetected(qrValue)
+                                return@addOnSuccessListener
                             }
                         }
                     }
-                    .addOnFailureListener {
-                        // Handle failure gracefully
-                    }
-                    .addOnCompleteListener {
-                        // Crucial: Close the proxy to release the frame buffer for the next image
-                        imageProxy.close()
-                    }
-            } else {
-                imageProxy.close()
-            }
+                }
+                .addOnFailureListener {
+                    // Handle failure gracefully
+                }
+                .addOnCompleteListener {
+                    // Crucial: Close the proxy to release the frame buffer for the next image
+                    imageProxy.close()
+                }
         } else {
-            // Drop the frame to slow down the analysis rate
             imageProxy.close()
         }
     }
@@ -86,6 +85,12 @@ fun QrScannerPreview(
 
     // Dedicated executor to handle background image analysis
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraExecutor.shutdown()
+        }
+    }
 
     AndroidView(
         factory = { ctx ->
@@ -145,8 +150,10 @@ fun QrScannerScreen(
         if(!isDetected) {
             QrScannerPreview(
                 onQrDetected = { code ->
-                    isDetected = true
-                    onQrIDDetected(code)
+                    if (!isDetected) {
+                        isDetected = true
+                        onQrIDDetected(code)
+                    }
                 }
             )
         }

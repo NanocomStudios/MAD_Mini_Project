@@ -57,13 +57,13 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.FloatingActionButton
-import lk.nanocom.app.madminiproject.ui.theme.MADMiniProjectTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.FabPosition
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Doorbell
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -97,6 +97,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
+import lk.nanocom.app.madminiproject.ui.theme.MainColorTheme
 
 data class DeviceToggleEvent(
     val deviceId: String,
@@ -111,92 +112,6 @@ object FCMEventManager {
         _deviceEvents.tryEmit(event)
     }
 }
-
-data class SessionIDRequest(
-    val sessionID: String
-)
-
-data class FirebaseTokenUpdateRequest(
-    val userID: Int,
-    val firebaseToken: String,
-    val sessionID: String
-)
-
-data class STDResponse(
-    val response: String,
-    val error: String?
-)
-
-data class AppActionRequest(
-    val itemID: Int,
-    val action: String,
-    val value: Int,
-    val sessionID: String
-)
-
-data class FloorRequest(
-    val floorName: String,
-    val sessionID: String
-)
-
-data class RoomRequest(
-    val floorName: String,
-    val roomName: String,
-    val sessionID: String
-)
-
-data class ItemInfoRequest(
-    val itemID: Int,
-    val sessionID: String
-)
-
-data class ItemInfoResponse(
-    val response: String,
-    val itemID: Int,
-    val itemName: String,
-    val type: String,
-    val state: String,
-    val lastOnTime: String,
-    val cuttofftime: String,
-    val error: String? = null
-
-)
-
-data class LogEntry(
-    val itemID: Int,
-    val state: String,
-    val timestamp: String
-)
-
-data class ItemLogResponse(
-    val response: String,
-    val itemID: Int,
-    val logs: List<LogEntry>,
-    val error: String? = null
-)
-
-data class DeviceRequest(
-    val floorName: String,
-    val roomName: String,
-    val itemID: Int,
-    val itemName: String = "",
-    val sessionID: String
-)
-
-data class ScheduleItemRequest(
-    val itemID: Int,
-    val action: String,
-    val value: Int,
-    val time_from: String,
-    val time_to: String,
-    val sessionID: String
-)
-
-data class CutoffTimeRequest(
-    val itemID: Int,
-    val cutoffTime: String,
-    val sessionID: String
-)
 
 
 fun isAppInBackground(): Boolean {
@@ -316,12 +231,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MADMiniProjectTheme {
+            MainColorTheme {
                 val validated = isSessionValidated.value
                 if (validated == null) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Loading...")
-                    }
+                    BouncingDotsLoading()
                 } else {
                     SmartHomeApp(
                         startDestination = if (validated) "floors" else "login",
@@ -732,7 +645,7 @@ fun SmartHomeApp(
                 navController.previousBackStackEntry
                     ?.savedStateHandle
                     ?.set("scan_result", code)
-//                navController.popBackStack()
+                navController.popBackStack()
             }
         }
 
@@ -1764,16 +1677,19 @@ fun DeviceCard(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-                StatusBadge(device.status)
+
 
                 when (device.type) {
                     "switch" -> {
+                        StatusBadge(device.status)
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
                     "light" -> {
+                        StatusBadge(device.status)
                         Switch(checked = device.isOn, onCheckedChange = { onToggle() })
                     }
                     "multiswitch" -> {
+                        StatusBadge(device.status)
                         Text(
                             "${device.switches?.count { it.isOn } ?: 0}/${device.switches?.size ?: 0} on",
                             style = MaterialTheme.typography.bodySmall
@@ -1786,7 +1702,11 @@ fun DeviceCard(
                     "camera" -> {
                         Icon(Icons.Default.Videocam, contentDescription = null)
                     }
+                    "doorbell" -> {
+                        Icon(Icons.Default.Doorbell, contentDescription = null)
+                    }
                     else ->{
+                        StatusBadge(device.status)
                         Log.d("DeviceCard", "Unknown device type: ${device.type}")
                     }
                 }

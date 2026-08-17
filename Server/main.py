@@ -214,8 +214,18 @@ def toggleItemState(itemID, action, value):
 
             for session in sessions:
                 sessionID = session[0]
+
+                msg_body = ""
+
+                if(action == "toggle"):
+                    if(value == 1):
+                        msg_body = "Item " + str(itemID) + " has been turned ON!"
+                    else:
+                        msg_body = "Item " + str(itemID) + " has been turned OFF!"
+                
+
                 message = messaging.Message(
-                    notification=messaging.Notification(title="Scheduled Action", body= "item/" + str(itemID) + " : " + action + " : " + str(value)),
+                    notification=messaging.Notification(title="Scheduled Action", body= msg_body),
                     data=push_notification_data,
                     token=session[3] # Target specific device
                 )
@@ -689,11 +699,20 @@ def itemAction(action: ItemAction):
 
             for session in sessions:
                 sessionID = session[0]
-                message = messaging.Message(
-                    notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
-                    data=push_notification_data,
-                    token=session[3] # Target specific device
-                )
+                message = None
+                                        
+                if(action.action == "ring"):
+                    message = messaging.Message(
+                        notification=messaging.Notification(title="DoorBell", body= "SomeOne is at the door!"),
+                        data=push_notification_data,
+                        token=session[3] # Target specific device
+                    )
+                else:
+
+                    message = messaging.Message(
+                        data=push_notification_data,
+                        token=session[3] # Target specific device
+                    )
                 try:
                     response = messaging.send(message)
                     print("Successfully sent message:", response)
@@ -808,11 +827,21 @@ def appAction(action: AppAction):
                 for session in sessions:
                     sessionID = session[0]
                     if(device_session[3] != session[3]):  # Avoid sending notification to the same device that initiated the action
-                        message = messaging.Message(
-                            notification=messaging.Notification(title="Action", body= "item/" + str(action.itemID) + " : " + action.action + " : " + str(action.value)),
-                            data=push_notification_data,
-                            token=session[3] # Target specific device
-                        )
+
+                        message = None
+                        
+                        if(action.action == "ring"):
+                            message = messaging.Message(
+                                notification=messaging.Notification(title="DoorBell", body= "SomeOne is at the door!"),
+                                data=push_notification_data,
+                                token=session[3] # Target specific device
+                            )
+                        else:
+
+                            message = messaging.Message(
+                                data=push_notification_data,
+                                token=session[3] # Target specific device
+                            )
                         try:
                             response = messaging.send(message)
                             print("Successfully sent message:", response)

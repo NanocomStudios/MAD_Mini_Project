@@ -80,7 +80,7 @@ fun LoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF252525))
+            .background(MaterialTheme.colorScheme.background)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -92,14 +92,14 @@ fun LoginScreen(
         ) {
 
             Text(
-                color = Color(0xFFFFFFFF),
+                color = MaterialTheme.colorScheme.onBackground,
                 text = "MAD Mini Project",
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.headlineMedium
             )
 
             Text(
-                color = Color(0xFFFFFFFF),
+                color = MaterialTheme.colorScheme.onBackground,
                 text = "Login",
                 style = MaterialTheme.typography.titleLarge
             )
